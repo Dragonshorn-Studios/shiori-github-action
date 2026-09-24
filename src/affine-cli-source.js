@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
+import { AffinePropertyReader } from './affine-properties.js';
 
 export const AFFINE_CLI_REVISION = 'a65839c020dfabf6132ef3f5754fbdb0b53813aa';
 
@@ -8,17 +9,22 @@ export class AffineCliSource {
   constructor(config) {
     this.config = config;
     this.command = resolveCli(config);
+    this.properties = new AffinePropertyReader(config);
   }
 
   async getDocument(id) {
     const metadata = unwrapDocument(this.run(['doc', 'get', '--doc-id', id]));
     const exported = this.run(['doc', 'export-markdown', '--doc-id', id]);
+    const iconUrl = this.config.skillIconProperty
+      ? await this.properties.getTextProperty(id, this.config.skillIconProperty)
+      : null;
     return {
       id,
       title: metadata.title || `Untitled ${id.slice(0, 8)}`,
       updatedAt: metadata.updatedAt ?? null,
       revision: metadata.updatedAt ?? null,
-      markdown: exported.markdown ?? unwrapDocument(exported).markdown ?? ''
+      markdown: exported.markdown ?? unwrapDocument(exported).markdown ?? '',
+      properties: iconUrl ? { [this.config.skillIconProperty]: iconUrl } : {}
     };
   }
 

@@ -32,12 +32,16 @@ async function main() {
     affineCli: input('affine-cli', 'affine'),
     installAffineCli: booleanInput('install-affine-cli', true),
     skillTag: input('skill-tag', 'skill').trim(),
+    skillIconProperty: input('skill-icon-property', 'shiori-icon').trim(),
+    skillIconAllowedOrigins: input('skill-icon-allowed-origins').split(',').map(value => value.trim()).filter(Boolean).map(value => new URL(value).origin),
+    skillIconMaxBytes: Number.parseInt(input('skill-icon-max-bytes', '524288'), 10),
     skillsDirectory: input('skills-directory', '.agents/skills'),
     pluginDirectory: input('plugin-directory', 'plugins'),
     marketplaceName: input('marketplace-name', 'shiori-knowledge'),
     repository: input('repository', process.env.GITHUB_REPOSITORY ?? '').trim()
   };
   if (!Number.isSafeInteger(config.maxDocuments) || config.maxDocuments < 1) throw new Error("Input 'max-documents' must be a positive integer.");
+  if (!Number.isSafeInteger(config.skillIconMaxBytes) || config.skillIconMaxBytes < 1) throw new Error("Input 'skill-icon-max-bytes' must be a positive integer.");
   new URL(config.baseUrl);
   console.log('::group::Shiori — compiling AFFiNE knowledge');
   const result = await compile(new AffineCliSource(config), config);

@@ -38,6 +38,15 @@ inputs:
   skill-tag:
     description: AFFiNE tag that marks exported documents for Agent Skill generation. Empty disables skills.
     default: skill
+  skill-icon-property:
+    description: AFFiNE text custom property containing an absolute icon URL for tagged skills. Empty disables icons.
+    default: shiori-icon
+  skill-icon-allowed-origins:
+    description: Optional comma-separated additional URL origins allowed for skill icons. The AFFiNE origin is always allowed.
+    required: false
+  skill-icon-max-bytes:
+    description: Maximum downloaded icon size in bytes.
+    default: "524288"
   skills-directory:
     description: Repository-relative canonical Agent Skills directory.
     default: .agents/skills
@@ -45,7 +54,7 @@ inputs:
     description: Repository-relative directory for installable generated plugins.
     default: plugins
   marketplace-name:
-    description: Name used by generated Claude Code, ZCode-compatible, and Cursor marketplace catalogs.
+    description: Name used by generated Claude Code, ZCode, and Cursor marketplace catalogs.
     default: shiori-knowledge
   repository:
     description: GitHub owner/repository used by Devin install metadata; defaults to GITHUB_REPOSITORY.
@@ -57,4 +66,4 @@ outputs:
     description: Number of tagged documents generated as Agent Skills.
 runs:
   using: node20
-  main: src/main.js
+  main: dist/index.js
