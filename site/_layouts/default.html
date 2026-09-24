@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#17131d">
+    <title>{{ page.title }} · {{ site.title }}</title>
+    <link rel="stylesheet" href="{{ '/assets/css/shiori.css' | relative_url }}">
+  </head>
+  <body>
+    <header class="masthead">
+      <a class="brand" href="{{ '/' | relative_url }}" aria-label="Shiori Archive home">
+        <span class="sigil" aria-hidden="true">S</span>
+        <span><strong>Shiori</strong><small>project archive</small></span>
+      </a>
+    </header>
+    <div class="page-shell">
+      <aside class="catalogue" aria-label="Archive catalogue">
+        <p class="eyebrow">Catalogue</p>
+        <nav>
+          <a href="{{ '/brain/README.html' | relative_url }}">Archive index</a>
+          {% include nav.html items=site.data.shiori-nav depth=0 %}
+        </nav>
+      </aside>
+      <main class="document">{{ content }}</main>
+    </div>
+    <footer>Compiled by Shiori · the archive lives in Git</footer>
+  </body>
+</html>

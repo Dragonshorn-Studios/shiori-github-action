@@ -1,0 +1,15 @@
+{
+  "name": "shiori-github-action",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Export a bounded AFFiNE knowledge tree to deterministic repository-native Markdown.",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/main.js && node --check src/compiler.js && node --check src/affine-cli-source.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,10 @@
+title: Shiori Archive
+description: Repository-native project knowledge, compiled from AFFiNE.
+markdown: kramdown
+exclude:
+  - brain/manifest.json
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default

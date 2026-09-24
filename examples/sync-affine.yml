@@ -1,0 +1,34 @@
+name: Sync AFFiNE knowledge
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: Dragonshorn-Studios/shiori-github-action@v1
+        with:
+          affine-base-url: ${{ vars.AFFINE_BASE_URL }}
+          affine-token: ${{ secrets.AFFINE_API_TOKEN }}
+          workspace-id: ${{ vars.AFFINE_WORKSPACE_ID }}
+          root-document-id: ${{ vars.AFFINE_ROOT_DOCUMENT_ID }}
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: docs/shiori-sync
+          delete-branch: true
+          commit-message: "docs(brain): sync AFFiNE knowledge"
+          title: "docs(brain): sync AFFiNE knowledge"
+          body: |
+            Automated Shiori snapshot of the configured AFFiNE knowledge subtree.
+            AFFiNE remains the canonical source of truth.

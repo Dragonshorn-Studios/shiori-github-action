@@ -1,0 +1,43 @@
+name: Shiori
+description: Export a selected AFFiNE knowledge subtree to deterministic Markdown.
+author: Dragonshorn Studios
+branding:
+  icon: book-open
+  color: purple
+inputs:
+  affine-base-url:
+    description: Base URL of the AFFiNE instance.
+    required: true
+  affine-token:
+    description: AFFiNE API token. Pass this from GitHub Secrets.
+    required: true
+  workspace-id:
+    description: AFFiNE workspace UUID.
+    required: true
+  root-document-id:
+    description: Document at the root of the export boundary.
+    required: true
+  output-directory:
+    description: Repository-relative output directory.
+    default: docs/brain
+  agent-file:
+    description: Repository-relative AGENTS.md adapter path, or empty to disable.
+    default: AGENTS.md
+  pages:
+    description: Generate the lightweight GitHub Pages shell beside the brain.
+    default: "true"
+  max-documents:
+    description: Safety cap for documents reached from the configured root.
+    default: "250"
+  affine-cli:
+    description: Path or command name for affine-cli.
+    default: affine
+  install-affine-cli:
+    description: Install the tested affine-cli revision with Go when it is absent.
+    default: "true"
+outputs:
+  document-count:
+    description: Number of AFFiNE documents exported.
+runs:
+  using: node20
+  main: src/main.js

@@ -1,0 +1,30 @@
+{
+  "root": {
+    "id": "root",
+    "title": "Project Brain",
+    "updatedAt": "2026-01-02T03:04:05.000Z",
+    "revision": "r1",
+    "markdown": "# Project Brain\n\nRead [Architecture](https://affine.example/workspace/ws-123/architecture) and [Product / Vision](https://affine.example/workspace/ws-123/product). Ignore [Private](https://affine.example/workspace/other/private-doc)."
+  },
+  "architecture": {
+    "id": "architecture",
+    "title": "Architecture & APIs",
+    "updatedAt": "2026-01-03T03:04:05.000Z",
+    "revision": "r2",
+    "markdown": "# Architecture\n\nSee [Decision](https://affine.example/workspace/ws-123/decision-one)."
+  },
+  "product": {
+    "id": "product",
+    "title": "Product / Vision",
+    "updatedAt": "2026-01-04T03:04:05.000Z",
+    "revision": "r3",
+    "markdown": "# Product\n"
+  },
+  "decision-one": {
+    "id": "decision-one",
+    "title": "Use Git for history",
+    "updatedAt": "2026-01-05T03:04:05.000Z",
+    "revision": "r4",
+    "markdown": "# Decision\n"
+  }
+}

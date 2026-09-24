@@ -1,0 +1,4 @@
+{% for item in include.items %}
+  <a{% if include.depth > 0 %} class="nested"{% endif %} href="{{ item.url | relative_url }}">{{ item.title }}</a>
+  {% if item.children %}{% include nav.html items=item.children depth=1 %}{% endif %}
+{% endfor %}
