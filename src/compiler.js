@@ -98,7 +98,8 @@ function createManifest(written, config, taggedIds) {
       workspaceId: config.workspaceId,
       rootDocumentId: config.rootDocumentId,
       traversal: 'same-workspace-links',
-      skillTag: config.skillTag || null
+      skillTag: config.skillTag || null,
+      skillIconProperty: config.skillIconProperty || null
     },
     documents: written.sort((a, b) => a.path.localeCompare(b.path)).map(({ document, path, content }) => ({
       id: document.id,

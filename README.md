@@ -118,9 +118,12 @@ A complete copy is available at [`examples/sync-affine.yml`](examples/sync-affin
 | `affine-cli` | no | `affine` | Existing CLI command: an absolute executable path or a command name available on the runner's `PATH`; when absent, `install-affine-cli` installs and locates the pinned CLI |
 | `install-affine-cli` | no | `true` | Install the pinned tested revision with Go if absent |
 | `skill-tag` | no | `skill` | Exact AFFiNE tag used to generate Agent Skills; empty disables generation |
+| `skill-icon-property` | no | `shiori-icon` | AFFiNE text custom property containing an absolute icon URL; empty disables icons |
+| `skill-icon-allowed-origins` | no | — | Comma-separated additional URL origins allowed for icons; the AFFiNE origin is always allowed |
+| `skill-icon-max-bytes` | no | `524288` | Maximum downloaded icon size in bytes |
 | `skills-directory` | no | `.agents/skills` | Canonical project-local Agent Skills directory |
 | `plugin-directory` | no | `plugins` | Installable generated plugin packages |
-| `marketplace-name` | no | `shiori-knowledge` | Marketplace name used by Claude Code, ZCode's compatible plugin marketplace, and Cursor |
+| `marketplace-name` | no | `shiori-knowledge` | Marketplace name used by Claude Code, ZCode, and Cursor |
 | `repository` | no | `GITHUB_REPOSITORY` | GitHub `owner/repository` used by Devin plugin metadata |
 
 The action exposes `document-count` and `skill-count` as outputs.
@@ -176,14 +179,15 @@ Following the cross-agent layout used by [`Rughalt/coding-agent-plugins`](https:
 
 It also creates an installable plugin for every tagged document under `plugins/shiori-<name>/` and maintains:
 
-- `.claude-plugin/marketplace.json` for Claude Code and ZCode marketplace installation;
+- `.claude-plugin/marketplace.json` for Claude Code;
 - `.cursor-plugin/marketplace.json` for Cursor;
+- `marketplace.json` plus `.zcode-plugin/plugin.json` manifests for ZCode;
 - `.devin-plugin/plugin.json` as a Devin meta-plugin that requires all generated skill plugins.
 
 For a repository `OWNER/REPO` using the default marketplace name:
 
 ```bash
-# Claude Code or ZCode
+# Claude Code
 /plugin marketplace add OWNER/REPO
 /plugin install shiori-architecture@shiori-knowledge
 
@@ -193,6 +197,22 @@ devin plugins install OWNER/REPO#plugins/shiori-architecture
 # Devin: every generated skill through the root meta-plugin
 devin plugins install OWNER/REPO
 ```
+
+For ZCode, open **Settings → Plugins → Create → Add marketplace** and enter `OWNER/REPO`. ZCode reads the repository-root `marketplace.json` and prefers each generated plugin's `.zcode-plugin/plugin.json` manifest.
+
+### Skill icons from AFFiNE
+
+Create a workspace-wide AFFiNE custom property named `shiori-icon` with type **Text**, then set it on any document carrying the `skill` tag. Its value must be an absolute URL to a PNG, JPEG, or WebP image. A square PNG is the most portable choice.
+
+Shiori does not leave the AFFiNE URL in generated plugin manifests. It downloads the image during synchronization, validates its origin, MIME type, file signature, and size, then vendors it under:
+
+```text
+plugins/shiori-<name>/assets/icon.<extension>
+```
+
+The AFFiNE origin is allowed automatically and receives the configured bearer token, which permits authenticated AFFiNE blob URLs. Redirects are rejected. External CDNs must be explicitly listed in `skill-icon-allowed-origins`; Shiori never sends the AFFiNE token to them.
+
+Cursor receives the repository-local `logo` path. ZCode receives a public `raw.githubusercontent.com` URL in the root marketplace, so its icon is visible only when that URL is accessible to the ZCode client. Devin's current public plugin manifest does not document an icon field; Shiori includes the asset in the plugin without emitting an unsupported field, ready for future Devin support.
 
 Cursor, Codex, Vibe, and compatible cloud agents can use the committed project-local directories immediately. The marketplace JSON files preserve non-Shiori entries and replace only plugin sources under the configured `plugins/shiori-*` namespace.
 
@@ -204,7 +224,7 @@ Every sync replaces the configured output directory. Do not put hand-written fil
 
 When Pages output is enabled, Shiori also maintains `docs/_config.yml`, `docs/index.md`, `docs/_data/shiori-nav.yml`, `docs/_layouts/default.html`, `docs/_includes/nav.html`, and `docs/assets/css/shiori.css`. Disable `pages` if those paths belong to an existing documentation site.
 
-Skill generation maintains only the files listed in `.shiori/generated-skills.json`, plus the Shiori entries in the three root marketplace manifests. Existing non-Shiori marketplace entries are preserved.
+Skill generation maintains only the files listed in `.shiori/generated-skills.json`, plus the Shiori entries in the four root marketplace manifests. Existing non-Shiori marketplace entries are preserved.
 
 Shiori updates only the section between `<!-- shiori:start -->` and `<!-- shiori:end -->` in `AGENTS.md`, preserving repository-specific instructions outside it.
 
@@ -222,20 +242,21 @@ Copy [`examples/pages.yml`](examples/pages.yml) to `.github/workflows/pages.yml`
 
 ## Local development
 
-Requirements: Node.js 20+. Runtime code has no npm dependencies.
+Requirements: Node.js 20+. Runtime dependencies are bundled into `dist/index.js` for the GitHub Action.
 
 ```bash
 npm test
 npm run check
+npm run build
 ```
 
-Tests use an in-memory fixture rather than a live AFFiNE workspace. They cover deterministic output, path/title sanitization, hierarchy conversion, manifest generation, same-origin/workspace subtree protection, output path containment, link rewriting, preservation of existing agent instructions, tag filtering, cross-agent skill packaging, and marketplace generation.
+Tests use an in-memory fixture rather than a live AFFiNE workspace. They cover deterministic output, path/title sanitization, hierarchy conversion, manifest generation, same-origin/workspace subtree protection, output path containment, link rewriting, preservation of existing agent instructions, tag filtering, icon download validation, cross-agent skill packaging, and marketplace generation.
 
 For a manual live run, GitHub Actions maps input names from `action.yml` to environment variables named `INPUT_<NAME>` using uppercase letters and underscores in place of hyphens. For example, `affine-base-url` becomes `INPUT_AFFINE_BASE_URL`, `workspace-id` becomes `INPUT_WORKSPACE_ID`, and `root-document-id` becomes `INPUT_ROOT_DOCUMENT_ID`. Set the required variables plus `GITHUB_WORKSPACE` pointing to a disposable checkout, then run `node src/main.js`. Never point a development run at a directory containing irreplaceable generated output.
 
 ## Architecture
 
-- `AffineCliSource` fetches one normalized document at a time. It is the only AFFiNE-specific module.
+- `AffineCliSource` fetches one normalized document at a time; `AffinePropertyReader` reads custom-property definitions and values from AFFiNE's dedicated WorkspaceDB subdocuments.
 - `collectDocuments` enforces the bounded traversal and produces normalized documents.
 - The compiler assigns deterministic paths, rewrites internal links, and emits the index and manifest.
 - Thin output adapters maintain the managed `AGENTS.md` section, optional Jekyll shell, standards-compatible Agent Skills, and marketplace manifests.
@@ -248,6 +269,7 @@ There is no database, backend, account system, webhook service, RAG layer, or MC
 - The token flow is intended primarily for compatible self-hosted deployments. AFFiNE Cloud and AFFiNE 0.27+ authentication behavior is evolving; current third-party research reports that Cloud may require browser-session authentication instead of programmatic API tokens.
 - The MVP traverses explicit same-workspace document links. It does not decode the newer sidebar organize/folder subdocument. This is conservative and predictable, but a visually nested sidebar folder that is not represented by document links will not be exported.
 - Advanced AFFiNE block types may be lossy in Markdown because conversion fidelity is bounded by the source adapter.
+- Skill icons use AFFiNE's realtime/Yjs custom-property storage because the current GraphQL document metadata and Markdown export do not expose custom properties.
 
 These uncertainties are deliberately contained in the source adapter. The repository snapshot format is independent of them.
 

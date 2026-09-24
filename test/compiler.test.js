@@ -16,6 +16,12 @@ class FixtureSource {
 }
 
 class TaggedFixtureSource extends FixtureSource {
+  async getDocument(id) {
+    const document = await super.getDocument(id);
+    if (id === 'architecture') document.properties = { 'shiori-icon': 'https://affine.example/assets/architecture.png' };
+    return document;
+  }
+
   async listTaggedDocumentIds() {
     return ['architecture', 'private-doc'];
   }
@@ -102,7 +108,15 @@ test('turns only exported documents with the skill tag into cross-agent skills a
     skillsDirectory: '.agents/skills',
     pluginDirectory: 'plugins',
     marketplaceName: 'project-knowledge',
-    repository: 'example/project'
+    repository: 'example/project',
+    skillIconProperty: 'shiori-icon',
+    skillIconAllowedOrigins: [],
+    skillIconMaxBytes: 524288,
+    fetchImpl: async (url, options) => {
+      assert.equal(url.href, 'https://affine.example/assets/architecture.png');
+      assert.equal(options.headers.Authorization, undefined);
+      return new Response(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]), { headers: { 'content-type': 'image/png' } });
+    }
   };
   const result = await compile(new TaggedFixtureSource(), config);
   assert.equal(result.skillCount, 1);
@@ -111,6 +125,9 @@ test('turns only exported documents with the skill tag into cross-agent skills a
   const reference = await readFile(join(repositoryRoot, '.agents/skills/architecture-apis/references/source.md'), 'utf8');
   const claudeMarketplace = JSON.parse(await readFile(join(repositoryRoot, '.claude-plugin/marketplace.json'), 'utf8'));
   const cursorMarketplace = JSON.parse(await readFile(join(repositoryRoot, '.cursor-plugin/marketplace.json'), 'utf8'));
+  const zcodeMarketplace = JSON.parse(await readFile(join(repositoryRoot, 'marketplace.json'), 'utf8'));
+  const cursorPlugin = JSON.parse(await readFile(join(repositoryRoot, 'plugins/shiori-architecture-apis/.cursor-plugin/plugin.json'), 'utf8'));
+  const zcodePlugin = JSON.parse(await readFile(join(repositoryRoot, 'plugins/shiori-architecture-apis/.zcode-plugin/plugin.json'), 'utf8'));
   const devinPlugin = JSON.parse(await readFile(join(repositoryRoot, '.devin-plugin/plugin.json'), 'utf8'));
 
   assert.match(canonical, /name: architecture-apis/);
@@ -118,7 +135,11 @@ test('turns only exported documents with the skill tag into cross-agent skills a
   assert.match(reference, /See \[Decision\]/);
   assert.deepEqual(claudeMarketplace.plugins.map(item => item.name), ['handwritten', 'shiori-architecture-apis']);
   assert.deepEqual(cursorMarketplace.plugins.map(item => item.name), ['shiori-architecture-apis']);
+  assert.equal(cursorPlugin.logo, 'assets/icon.png');
+  assert.equal(zcodePlugin.skills, 'skills');
+  assert.equal(zcodeMarketplace.plugins[0].icon, 'https://raw.githubusercontent.com/example/project/HEAD/plugins/shiori-architecture-apis/assets/icon.png');
   assert.equal(devinPlugin.requiredPlugins[0].path, 'plugins/shiori-architecture-apis');
+  assert.deepEqual(await readFile(join(repositoryRoot, 'plugins/shiori-architecture-apis/assets/icon.png')), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]));
   await readFile(join(repositoryRoot, '.claude/skills/architecture-apis/SKILL.md'), 'utf8');
   await readFile(join(repositoryRoot, '.cursor/skills/architecture-apis/SKILL.md'), 'utf8');
   await readFile(join(repositoryRoot, '.windsurf/skills/architecture-apis/SKILL.md'), 'utf8');
