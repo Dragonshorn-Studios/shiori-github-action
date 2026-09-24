@@ -20,7 +20,7 @@ docs/brain/
 
 ## Why the source adapter is small
 
-AFFiNE does not currently document a stable bulk Markdown export API. Metadata is available through GraphQL, while document content is stored as Yjs data and normally read through AFFiNE's realtime protocol. Shiori isolates that detail behind `AffineCliSource` and pins the tested revision of the community [`affine-cli`](https://github.com/tomohiro-owada/affine-cli), which already implements that protocol and Markdown conversion.
+AFFiNE does not currently document a stable bulk Markdown export API. Metadata is available through GraphQL, while document content is stored as Yjs data and normally read through AFFiNE's realtime protocol. Shiori isolates that detail behind `AffineCliSource` and pins a tested commit SHA of the community [`affine-cli`](https://github.com/tomohiro-owada/affine-cli), which already implements that protocol and Markdown conversion. The current pin is recorded in [`src/affine-cli-source.js`](src/affine-cli-source.js) so it cannot drift independently from the Action.
 
 The older official-community [`affine-reader`](https://github.com/toeverything/affine-reader) informed the model, but it targets a narrower cloud-oriented flow and exposes a refresh-token interface rather than the configured self-hosted base URL required here.
 
@@ -30,8 +30,10 @@ This boundary means a future official AFFiNE export API can replace one source a
 
 The `root-document-id` is the explicit disclosure boundary. Shiori exports that document and recursively follows Markdown document links only when they:
 
-- point to the configured AFFiNE origin (or use the `affine:` scheme), and
+- point to the configured AFFiNE origin (or use an `affine:` URI whose path or query contains the workspace identity), and
 - contain the configured workspace ID.
+
+The `affine:` handling belongs to Shiori's link traversal, not `affine-cli`: Shiori extracts the same-workspace document ID from links such as `affine:///workspace/<workspace-id>/<doc-id>`, then asks the source adapter to export that ID.
 
 External links and links to another workspace are preserved but never fetched. `max-documents` provides a second explicit cap. Secrets are passed to the source command through environment variables and are never written to the manifest.
 
@@ -54,6 +56,8 @@ Create repository variables:
 - `AFFINE_ROOT_DOCUMENT_ID`
 
 Create the Actions secret `AFFINE_API_TOKEN`, then add this workflow:
+
+Shiori enables the GitHub Pages shell by default. If the parent of `output-directory` already contains a Jekyll site or files you need to preserve—for the default `docs/brain`, that parent is `docs/`—set `pages: false`; Pages mode maintains files including `_config.yml`, `index.md`, and `_layouts/default.html` there.
 
 ```yaml
 name: Sync AFFiNE knowledge
@@ -111,15 +115,24 @@ A complete copy is available at [`examples/sync-affine.yml`](examples/sync-affin
 | `agent-file` | no | `AGENTS.md` | Thin managed agent bootstrap; empty disables it |
 | `pages` | no | `true` | Generate the Pages shell beside the output |
 | `max-documents` | no | `250` | Traversal safety cap |
-| `affine-cli` | no | `affine` | Existing CLI path/name |
+| `affine-cli` | no | `affine` | Existing CLI command: an absolute executable path or a command name available on the runner's `PATH`; when absent, `install-affine-cli` installs and locates the pinned CLI |
 | `install-affine-cli` | no | `true` | Install the pinned tested revision with Go if absent |
 | `skill-tag` | no | `skill` | Exact AFFiNE tag used to generate Agent Skills; empty disables generation |
 | `skills-directory` | no | `.agents/skills` | Canonical project-local Agent Skills directory |
 | `plugin-directory` | no | `plugins` | Installable generated plugin packages |
-| `marketplace-name` | no | `shiori-knowledge` | Claude/ZCode and Cursor marketplace name |
+| `marketplace-name` | no | `shiori-knowledge` | Marketplace name used by Claude Code, ZCode's compatible plugin marketplace, and Cursor |
 | `repository` | no | `GITHUB_REPOSITORY` | GitHub `owner/repository` used by Devin plugin metadata |
 
 The action exposes `document-count` and `skill-count` as outputs.
+
+```yaml
+- id: shiori
+  uses: Dragonshorn-Studios/shiori-github-action@v1
+  with:
+    # ...same inputs as in Quick start
+- run: |
+    echo "Exported ${{ steps.shiori.outputs.document-count }} docs, ${{ steps.shiori.outputs.skill-count }} skills"
+```
 
 ## Tagged documents become Agent Skills
 
@@ -134,6 +147,20 @@ When an exported AFFiNE document has the configured `skill` tag, Shiori generate
 
 `SKILL.md` stays small and tells the agent when to load the skill. The tagged AFFiNE document becomes the progressive `references/source.md` payload. Untagged brain documents are not duplicated into skill packages.
 
+The installable copy is packaged as:
+
+```text
+plugins/shiori-<name>/
+├── .claude-plugin/plugin.json
+├── .cursor-plugin/plugin.json
+├── .devin-plugin/plugin.json
+└── skills/<name>/
+    ├── SKILL.md
+    └── references/source.md
+```
+
+The three plugin manifests describe the same packaged skill for their respective hosts. At repository root, `.claude-plugin/marketplace.json`, `.cursor-plugin/marketplace.json`, and `.devin-plugin/plugin.json` catalog or require those packages; regeneration replaces Shiori entries idempotently while preserving entries not owned by Shiori.
+
 Following the cross-agent layout used by [`Rughalt/coding-agent-plugins`](https://github.com/Rughalt/coding-agent-plugins), Shiori emits project-local copies for:
 
 | Agent | Generated path |
@@ -141,9 +168,11 @@ Following the cross-agent layout used by [`Rughalt/coding-agent-plugins`](https:
 | Codex, Zed, OpenCode and Agent Skills-compatible tools | `.agents/skills/<name>/` |
 | Claude Code | `.claude/skills/<name>/` |
 | Cursor | `.cursor/skills/<name>/` |
-| ZCode/Windsurf | `.windsurf/skills/<name>/` |
+| Windsurf | `.windsurf/skills/<name>/` |
 | Vibe | `.vibe/skills/<name>/` |
 | Devin project sessions | `.devin/skills/<name>/` |
+
+[ZCode](https://zcode.z.ai/en/docs/plugin) is a separate coding-agent product, not another name for Windsurf. Shiori serves ZCode through the generated plugin marketplace: ZCode prefers `.zcode-plugin/plugin.json` but explicitly accepts the generated Claude-compatible `.claude-plugin/plugin.json` fallback.
 
 It also creates an installable plugin for every tagged document under `plugins/shiori-<name>/` and maintains:
 
@@ -179,11 +208,17 @@ Skill generation maintains only the files listed in `.shiori/generated-skills.js
 
 Shiori updates only the section between `<!-- shiori:start -->` and `<!-- shiori:end -->` in `AGENTS.md`, preserving repository-specific instructions outside it.
 
+### Jekyll template sources
+
+The files `site/index.md` and `site/_config.yml` are source templates that Shiori copies into the parent of `output-directory` when `pages: true`; with the default `docs/brain`, that destination is `docs/`. Make template changes under `site/`, not in the generated destination. The layout, navigation include, and stylesheet are likewise repository templates at `site/_layouts/default.html`, `site/_includes/nav.html`, and `site/assets/css/shiori.css`; Shiori copies them at runtime rather than compiling them into an Action binary.
+
 ## GitHub Pages
 
-With `pages: true`, Shiori writes a no-plugin Jekyll shell under `docs/` and uses the generated brain Markdown directly. The original theme uses near-black, paper white, desaturated purple, and pale gold with restrained catalogue/bookmark details. It contains no character art, logos, screenshots, or copied decorative assets.
+With `pages: true`, Shiori writes a no-plugin Jekyll shell beside the generated brain—under `docs/` with the default `docs/brain` output—and uses that Markdown directly. The original theme uses near-black, paper white, desaturated purple, and pale gold with restrained catalogue/bookmark details. It contains no character art, logos, screenshots, or copied decorative assets.
 
-Copy [`examples/pages.yml`](examples/pages.yml) to `.github/workflows/pages.yml`, set the repository's Pages source to **GitHub Actions**, and run the workflow. Navigation is generated from the same AFFiNE hierarchy as `docs/brain/README.md`.
+Before deploying, enable Pages in the target repository under **Settings → Pages → Build and deployment → Source: GitHub Actions**. Without that setting, `actions/deploy-pages` fails because Pages is not enabled.
+
+Copy [`examples/pages.yml`](examples/pages.yml) to `.github/workflows/pages.yml` and run the workflow. Navigation is generated from the same AFFiNE hierarchy as `docs/brain/README.md`.
 
 ## Local development
 
@@ -196,7 +231,7 @@ npm run check
 
 Tests use an in-memory fixture rather than a live AFFiNE workspace. They cover deterministic output, path/title sanitization, hierarchy conversion, manifest generation, same-origin/workspace subtree protection, output path containment, link rewriting, preservation of existing agent instructions, tag filtering, cross-agent skill packaging, and marketplace generation.
 
-For a manual live run, set the `INPUT_*` environment variables documented in `action.yml`, set `GITHUB_WORKSPACE` to a disposable checkout, and run `node src/main.js`. Never point a development run at a directory containing irreplaceable generated output.
+For a manual live run, GitHub Actions maps input names from `action.yml` to environment variables named `INPUT_<NAME>` using uppercase letters and underscores in place of hyphens. For example, `affine-base-url` becomes `INPUT_AFFINE_BASE_URL`, `workspace-id` becomes `INPUT_WORKSPACE_ID`, and `root-document-id` becomes `INPUT_ROOT_DOCUMENT_ID`. Set the required variables plus `GITHUB_WORKSPACE` pointing to a disposable checkout, then run `node src/main.js`. Never point a development run at a directory containing irreplaceable generated output.
 
 ## Architecture
 

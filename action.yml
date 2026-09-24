@@ -30,7 +30,7 @@ inputs:
     description: Safety cap for documents reached from the configured root.
     default: "250"
   affine-cli:
-    description: Path or command name for affine-cli.
+    description: Absolute path or PATH command name for an existing affine-cli; automatic installation is used when absent and install-affine-cli is true.
     default: affine
   install-affine-cli:
     description: Install the tested affine-cli revision with Go when it is absent.
@@ -45,7 +45,7 @@ inputs:
     description: Repository-relative directory for installable generated plugins.
     default: plugins
   marketplace-name:
-    description: Name used by generated Claude/ZCode and Cursor marketplace catalogs.
+    description: Name used by generated Claude Code, ZCode-compatible, and Cursor marketplace catalogs.
     default: shiori-knowledge
   repository:
     description: GitHub owner/repository used by Devin install metadata; defaults to GITHUB_REPOSITORY.
