@@ -30,18 +30,24 @@ async function main() {
     pages: booleanInput('pages', true),
     maxDocuments: Number.parseInt(input('max-documents', '250'), 10),
     affineCli: input('affine-cli', 'affine'),
-    installAffineCli: booleanInput('install-affine-cli', true)
+    installAffineCli: booleanInput('install-affine-cli', true),
+    skillTag: input('skill-tag', 'skill').trim(),
+    skillsDirectory: input('skills-directory', '.agents/skills'),
+    pluginDirectory: input('plugin-directory', 'plugins'),
+    marketplaceName: input('marketplace-name', 'shiori-knowledge'),
+    repository: input('repository', process.env.GITHUB_REPOSITORY ?? '').trim()
   };
   if (!Number.isSafeInteger(config.maxDocuments) || config.maxDocuments < 1) throw new Error("Input 'max-documents' must be a positive integer.");
   new URL(config.baseUrl);
   console.log('::group::Shiori — compiling AFFiNE knowledge');
   const result = await compile(new AffineCliSource(config), config);
   console.log(`Exported ${result.documentCount} document(s) to ${config.outputDirectory}.`);
+  if (config.skillTag) console.log(`Generated ${result.skillCount} Agent Skill(s) from AFFiNE tag '${config.skillTag}'.`);
   console.log('::endgroup::');
   const outputFile = process.env.GITHUB_OUTPUT;
   if (outputFile) {
     const { appendFile } = await import('node:fs/promises');
-    await appendFile(outputFile, `document-count=${result.documentCount}\n`, 'utf8');
+    await appendFile(outputFile, `document-count=${result.documentCount}\nskill-count=${result.skillCount}\n`, 'utf8');
   }
 }
 

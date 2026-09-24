@@ -23,6 +23,7 @@ jobs:
           affine-token: ${{ secrets.AFFINE_API_TOKEN }}
           workspace-id: ${{ vars.AFFINE_WORKSPACE_ID }}
           root-document-id: ${{ vars.AFFINE_ROOT_DOCUMENT_ID }}
+          skill-tag: skill
       - uses: peter-evans/create-pull-request@v7
         with:
           branch: docs/shiori-sync

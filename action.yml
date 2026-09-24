@@ -35,9 +35,26 @@ inputs:
   install-affine-cli:
     description: Install the tested affine-cli revision with Go when it is absent.
     default: "true"
+  skill-tag:
+    description: AFFiNE tag that marks exported documents for Agent Skill generation. Empty disables skills.
+    default: skill
+  skills-directory:
+    description: Repository-relative canonical Agent Skills directory.
+    default: .agents/skills
+  plugin-directory:
+    description: Repository-relative directory for installable generated plugins.
+    default: plugins
+  marketplace-name:
+    description: Name used by generated Claude/ZCode and Cursor marketplace catalogs.
+    default: shiori-knowledge
+  repository:
+    description: GitHub owner/repository used by Devin install metadata; defaults to GITHUB_REPOSITORY.
+    required: false
 outputs:
   document-count:
     description: Number of AFFiNE documents exported.
+  skill-count:
+    description: Number of tagged documents generated as Agent Skills.
 runs:
   using: node20
   main: src/main.js

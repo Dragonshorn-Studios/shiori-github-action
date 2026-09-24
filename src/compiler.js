@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractDocumentLinks, rewriteDocumentLinks } from './links.js';
 import { normalizeMarkdown, sha256, slugify, stableJson } from './model.js';
+import { generateSkills } from './skills.js';
 
 const MANAGED_START = '<!-- shiori:start -->';
 const MANAGED_END = '<!-- shiori:end -->';
@@ -11,6 +12,11 @@ export async function compile(source, config) {
   const outputRoot = safeRepositoryPath(config.repositoryRoot, config.outputDirectory);
   const documents = await collectDocuments(source, config);
   const pathById = assignPaths(documents, config.rootDocumentId);
+  let taggedIds = new Set();
+  if (config.skillTag) {
+    if (typeof source.listTaggedDocumentIds !== 'function') throw new Error('The configured knowledge source does not support AFFiNE tag discovery.');
+    taggedIds = new Set(await source.listTaggedDocumentIds(config.skillTag));
+  }
   const written = [];
 
   await rm(outputRoot, { recursive: true, force: true });
@@ -27,7 +33,7 @@ export async function compile(source, config) {
   const readme = `---\nlayout: default\ntitle: Archive index\n---\n\n${renderIndex(documents, pathById, config.rootDocumentId)}`;
   await write(outputRoot, 'README.md', readme);
 
-  const manifest = createManifest(written, config);
+  const manifest = createManifest(written, config, taggedIds);
   await write(outputRoot, 'manifest.json', stableJson(manifest));
 
   if (config.agentFile) await updateAgentFile(config);
@@ -35,7 +41,12 @@ export async function compile(source, config) {
     await write(dirname(outputRoot), '_data/shiori-nav.yml', renderNavigation(documents, pathById, config.rootDocumentId));
     await writePagesShell(config, outputRoot);
   }
-  return { documentCount: documents.size, outputRoot, manifest };
+  let skillCount = 0;
+  if (config.skillTag) {
+    const generated = await generateSkills(documents, taggedIds, config);
+    skillCount = generated.count;
+  }
+  return { documentCount: documents.size, skillCount, outputRoot, manifest };
 }
 
 export async function collectDocuments(source, config) {
@@ -77,7 +88,7 @@ export function assignPaths(documents, rootId) {
   return paths;
 }
 
-function createManifest(written, config) {
+function createManifest(written, config, taggedIds) {
   return {
     schemaVersion: 1,
     generator: 'shiori',
@@ -86,7 +97,8 @@ function createManifest(written, config) {
       baseUrl: new URL(config.baseUrl).origin,
       workspaceId: config.workspaceId,
       rootDocumentId: config.rootDocumentId,
-      traversal: 'same-workspace-links'
+      traversal: 'same-workspace-links',
+      skillTag: config.skillTag || null
     },
     documents: written.sort((a, b) => a.path.localeCompare(b.path)).map(({ document, path, content }) => ({
       id: document.id,
@@ -94,6 +106,7 @@ function createManifest(written, config) {
       title: document.title,
       revision: document.revision,
       updatedAt: document.updatedAt,
+      skill: taggedIds.has(document.id),
       sha256: sha256(content)
     }))
   };

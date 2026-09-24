@@ -6,7 +6,7 @@
   "description": "Export a bounded AFFiNE knowledge tree to deterministic repository-native Markdown.",
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/main.js && node --check src/compiler.js && node --check src/affine-cli-source.js"
+    "check": "node --check src/main.js && node --check src/compiler.js && node --check src/affine-cli-source.js && node --check src/skills.js"
   },
   "engines": {
     "node": ">=20"

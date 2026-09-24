@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -12,6 +12,12 @@ class FixtureSource {
   async getDocument(id) {
     if (!fixture[id]) throw new Error(`Unexpected export outside fixture: ${id}`);
     return structuredClone(fixture[id]);
+  }
+}
+
+class TaggedFixtureSource extends FixtureSource {
+  async listTaggedDocumentIds() {
+    return ['architecture', 'private-doc'];
   }
 }
 
@@ -83,4 +89,39 @@ test('generates a dependency-free Pages shell and recursive navigation', async (
   assert.match(nav, /children:/);
   assert.match(nav, /Architecture & APIs/);
   assert.match(css, /--gold:/);
+});
+
+test('turns only exported documents with the skill tag into cross-agent skills and marketplaces', async () => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-skills-'));
+  await mkdir(join(repositoryRoot, '.claude-plugin'), { recursive: true });
+  await writeFile(join(repositoryRoot, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'existing-marketplace', plugins: [{ name: 'handwritten', source: './plugins/handwritten' }] }));
+  const config = {
+    ...baseConfig,
+    repositoryRoot,
+    skillTag: 'skill',
+    skillsDirectory: '.agents/skills',
+    pluginDirectory: 'plugins',
+    marketplaceName: 'project-knowledge',
+    repository: 'example/project'
+  };
+  const result = await compile(new TaggedFixtureSource(), config);
+  assert.equal(result.skillCount, 1);
+
+  const canonical = await readFile(join(repositoryRoot, '.agents/skills/architecture-apis/SKILL.md'), 'utf8');
+  const reference = await readFile(join(repositoryRoot, '.agents/skills/architecture-apis/references/source.md'), 'utf8');
+  const claudeMarketplace = JSON.parse(await readFile(join(repositoryRoot, '.claude-plugin/marketplace.json'), 'utf8'));
+  const cursorMarketplace = JSON.parse(await readFile(join(repositoryRoot, '.cursor-plugin/marketplace.json'), 'utf8'));
+  const devinPlugin = JSON.parse(await readFile(join(repositoryRoot, '.devin-plugin/plugin.json'), 'utf8'));
+
+  assert.match(canonical, /name: architecture-apis/);
+  assert.match(canonical, /references\/source\.md/);
+  assert.match(reference, /See \[Decision\]/);
+  assert.deepEqual(claudeMarketplace.plugins.map(item => item.name), ['handwritten', 'shiori-architecture-apis']);
+  assert.deepEqual(cursorMarketplace.plugins.map(item => item.name), ['shiori-architecture-apis']);
+  assert.equal(devinPlugin.requiredPlugins[0].path, 'plugins/shiori-architecture-apis');
+  await readFile(join(repositoryRoot, '.claude/skills/architecture-apis/SKILL.md'), 'utf8');
+  await readFile(join(repositoryRoot, '.cursor/skills/architecture-apis/SKILL.md'), 'utf8');
+  await readFile(join(repositoryRoot, '.windsurf/skills/architecture-apis/SKILL.md'), 'utf8');
+  await readFile(join(repositoryRoot, '.vibe/skills/architecture-apis/SKILL.md'), 'utf8');
+  await readFile(join(repositoryRoot, '.devin/skills/architecture-apis/SKILL.md'), 'utf8');
 });

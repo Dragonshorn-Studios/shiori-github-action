@@ -14,6 +14,7 @@ docs/brain/
   ├─ hierarchy-derived Markdown paths
   └─ manifest.json
        ├─ AGENTS.md bootstrap
+       ├─ tagged Agent Skills + plugin marketplaces
        └─ GitHub Pages
 ```
 
@@ -35,6 +36,14 @@ The `root-document-id` is the explicit disclosure boundary. Shiori exports that 
 External links and links to another workspace are preserved but never fetched. `max-documents` provides a second explicit cap. Secrets are passed to the source command through environment variables and are never written to the manifest.
 
 This MVP treats the linked document tree beneath the root document as the selected subtree. AFFiNE's newer sidebar folder/organize tree is an internal Yjs structure and is not yet a stable public API; see [Current AFFiNE limitations](#current-affine-limitations).
+
+### Why Shiori asks for a root document ID, not a folder ID
+
+An AFFiNE document has a stable source identity that the current read/export adapter can fetch directly. A sidebar folder is different: it is an organization node stored in AFFiNE's workspace-root Yjs metadata, not a normal document with a stable documented export endpoint. Its representation has changed across AFFiNE versions and the pinned adapter does not expose it as a safe read-only subtree API.
+
+The root document also acts as an explicit publication boundary. Shiori starts from exactly that document and can prove that every exported child was reached through a same-origin, same-workspace link. Accepting a folder ID through undocumented internals would make it easier for an AFFiNE upgrade or sidebar reorganization to export more material than intended.
+
+In practice, create a lightweight “project brain” document inside the desired folder and link the documents that belong in the repository snapshot. Use that document's ID as `root-document-id`. The folder can still organize the human-facing workspace; the root document is the stable, auditable export contract.
 
 ## Quick start
 
@@ -87,7 +96,8 @@ A complete copy is available at [`examples/sync-affine.yml`](examples/sync-affin
 2. Create a read-capable API token for the account/workspace and store it only as `AFFINE_API_TOKEN` in GitHub Actions secrets.
 3. Make a root document for the repository knowledge you intend to disclose.
 4. Link its child documents, and link deeper descendants from those documents. Only this reachable, same-workspace graph is exported.
-5. Copy the workspace and root document IDs from their AFFiNE URLs.
+5. Add the AFFiNE tag `skill` to any exported document that should also become an installable Agent Skill.
+6. Copy the workspace and root document IDs from their AFFiNE URLs.
 
 ### Action inputs
 
@@ -103,8 +113,59 @@ A complete copy is available at [`examples/sync-affine.yml`](examples/sync-affin
 | `max-documents` | no | `250` | Traversal safety cap |
 | `affine-cli` | no | `affine` | Existing CLI path/name |
 | `install-affine-cli` | no | `true` | Install the pinned tested revision with Go if absent |
+| `skill-tag` | no | `skill` | Exact AFFiNE tag used to generate Agent Skills; empty disables generation |
+| `skills-directory` | no | `.agents/skills` | Canonical project-local Agent Skills directory |
+| `plugin-directory` | no | `plugins` | Installable generated plugin packages |
+| `marketplace-name` | no | `shiori-knowledge` | Claude/ZCode and Cursor marketplace name |
+| `repository` | no | `GITHUB_REPOSITORY` | GitHub `owner/repository` used by Devin plugin metadata |
 
-The action exposes `document-count` as an output.
+The action exposes `document-count` and `skill-count` as outputs.
+
+## Tagged documents become Agent Skills
+
+When an exported AFFiNE document has the configured `skill` tag, Shiori generates a standards-compatible skill with:
+
+```text
+<skill-name>/
+├── SKILL.md
+└── references/
+    └── source.md
+```
+
+`SKILL.md` stays small and tells the agent when to load the skill. The tagged AFFiNE document becomes the progressive `references/source.md` payload. Untagged brain documents are not duplicated into skill packages.
+
+Following the cross-agent layout used by [`Rughalt/coding-agent-plugins`](https://github.com/Rughalt/coding-agent-plugins), Shiori emits project-local copies for:
+
+| Agent | Generated path |
+| --- | --- |
+| Codex, Zed, OpenCode and Agent Skills-compatible tools | `.agents/skills/<name>/` |
+| Claude Code | `.claude/skills/<name>/` |
+| Cursor | `.cursor/skills/<name>/` |
+| ZCode/Windsurf | `.windsurf/skills/<name>/` |
+| Vibe | `.vibe/skills/<name>/` |
+| Devin project sessions | `.devin/skills/<name>/` |
+
+It also creates an installable plugin for every tagged document under `plugins/shiori-<name>/` and maintains:
+
+- `.claude-plugin/marketplace.json` for Claude Code and ZCode marketplace installation;
+- `.cursor-plugin/marketplace.json` for Cursor;
+- `.devin-plugin/plugin.json` as a Devin meta-plugin that requires all generated skill plugins.
+
+For a repository `OWNER/REPO` using the default marketplace name:
+
+```bash
+# Claude Code or ZCode
+/plugin marketplace add OWNER/REPO
+/plugin install shiori-architecture@shiori-knowledge
+
+# Devin: one generated skill
+devin plugins install OWNER/REPO#plugins/shiori-architecture
+
+# Devin: every generated skill through the root meta-plugin
+devin plugins install OWNER/REPO
+```
+
+Cursor, Codex, Vibe, and compatible cloud agents can use the committed project-local directories immediately. The marketplace JSON files preserve non-Shiori entries and replace only plugin sources under the configured `plugins/shiori-*` namespace.
 
 ## Deterministic output
 
@@ -113,6 +174,8 @@ Titles are Unicode-normalized and sanitized into lowercase paths. The first hier
 Every sync replaces the configured output directory. Do not put hand-written files there.
 
 When Pages output is enabled, Shiori also maintains `docs/_config.yml`, `docs/index.md`, `docs/_data/shiori-nav.yml`, `docs/_layouts/default.html`, `docs/_includes/nav.html`, and `docs/assets/css/shiori.css`. Disable `pages` if those paths belong to an existing documentation site.
+
+Skill generation maintains only the files listed in `.shiori/generated-skills.json`, plus the Shiori entries in the three root marketplace manifests. Existing non-Shiori marketplace entries are preserved.
 
 Shiori updates only the section between `<!-- shiori:start -->` and `<!-- shiori:end -->` in `AGENTS.md`, preserving repository-specific instructions outside it.
 
@@ -131,7 +194,7 @@ npm test
 npm run check
 ```
 
-Tests use an in-memory fixture rather than a live AFFiNE workspace. They cover deterministic output, path/title sanitization, hierarchy conversion, manifest generation, same-origin/workspace subtree protection, output path containment, link rewriting, and preservation of existing agent instructions.
+Tests use an in-memory fixture rather than a live AFFiNE workspace. They cover deterministic output, path/title sanitization, hierarchy conversion, manifest generation, same-origin/workspace subtree protection, output path containment, link rewriting, preservation of existing agent instructions, tag filtering, cross-agent skill packaging, and marketplace generation.
 
 For a manual live run, set the `INPUT_*` environment variables documented in `action.yml`, set `GITHUB_WORKSPACE` to a disposable checkout, and run `node src/main.js`. Never point a development run at a directory containing irreplaceable generated output.
 
@@ -140,7 +203,7 @@ For a manual live run, set the `INPUT_*` environment variables documented in `ac
 - `AffineCliSource` fetches one normalized document at a time. It is the only AFFiNE-specific module.
 - `collectDocuments` enforces the bounded traversal and produces normalized documents.
 - The compiler assigns deterministic paths, rewrites internal links, and emits the index and manifest.
-- Thin output adapters maintain the managed `AGENTS.md` section and the optional Jekyll shell.
+- Thin output adapters maintain the managed `AGENTS.md` section, optional Jekyll shell, standards-compatible Agent Skills, and marketplace manifests.
 
 There is no database, backend, account system, webhook service, RAG layer, or MCP server.
 

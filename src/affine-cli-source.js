@@ -22,6 +22,15 @@ export class AffineCliSource {
     };
   }
 
+  async listTaggedDocumentIds(tag) {
+    const result = this.run(['tag', 'list-docs', '--tag', tag]);
+    const ids = result.doc_ids ?? result.docIds;
+    if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string')) {
+      throw new Error(`affine-cli returned invalid document IDs for tag '${tag}'.`);
+    }
+    return ids;
+  }
+
   run(args) {
     const env = {
       ...process.env,
