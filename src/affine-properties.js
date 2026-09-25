@@ -52,7 +52,9 @@ async function loadPropertySnapshot(config) {
 
 function connect(config) {
   const endpoint = new URL(config.baseUrl);
-  const extraHeaders = config.token ? { Authorization: `Bearer ${config.token}` } : undefined;
+  const extraHeaders = config.token
+    ? { Authorization: `Bearer ${config.token}` }
+    : config.cookie ? { Cookie: config.cookie } : undefined;
   return new Promise((resolve, reject) => {
     const socket = io(endpoint.origin, {
       transports: ['websocket'],

@@ -7,9 +7,10 @@ const MIME_EXTENSIONS = new Map([
 export async function fetchSkillIcon(rawUrl, config) {
   if (!rawUrl) return null;
   const url = validateIconUrl(rawUrl, config);
-  const headers = url.origin === new URL(config.baseUrl).origin && config.token
+  const sameOrigin = url.origin === new URL(config.baseUrl).origin;
+  const headers = sameOrigin && config.token
     ? { Authorization: `Bearer ${config.token}` }
-    : {};
+    : sameOrigin && config.cookie ? { Cookie: config.cookie } : {};
   const response = await (config.fetchImpl ?? fetch)(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error(`Unable to download skill icon from ${url.origin}: HTTP ${response.status}.`);
   const mime = String(response.headers.get('content-type') ?? '').split(';', 1)[0].trim().toLowerCase();

@@ -1,5 +1,6 @@
 import { compile } from './compiler.js';
 import { AffineCliSource } from './affine-cli-source.js';
+import { resolveAuth } from './affine-auth.js';
 
 function input(name, fallback = '') {
   const key = `INPUT_${name.replace(/ /g, '_').toUpperCase()}`;
@@ -22,7 +23,10 @@ async function main() {
   const config = {
     repositoryRoot: process.env.GITHUB_WORKSPACE || process.cwd(),
     baseUrl: required('affine-base-url'),
-    token: required('affine-token'),
+    token: input('affine-token').trim(),
+    cookie: input('affine-cookie').trim(),
+    email: input('affine-email').trim(),
+    password: input('affine-password'),
     workspaceId: required('workspace-id'),
     rootDocumentId: required('root-document-id'),
     outputDirectory: input('output-directory', 'docs/brain'),
@@ -43,6 +47,8 @@ async function main() {
   if (!Number.isSafeInteger(config.maxDocuments) || config.maxDocuments < 1) throw new Error("Input 'max-documents' must be a positive integer.");
   if (!Number.isSafeInteger(config.skillIconMaxBytes) || config.skillIconMaxBytes < 1) throw new Error("Input 'skill-icon-max-bytes' must be a positive integer.");
   new URL(config.baseUrl);
+  Object.assign(config, await resolveAuth(config));
+  config.password = '';
   console.log('::group::Shiori — compiling AFFiNE knowledge');
   const result = await compile(new AffineCliSource(config), config);
   console.log(`Exported ${result.documentCount} document(s) to ${config.outputDirectory}.`);

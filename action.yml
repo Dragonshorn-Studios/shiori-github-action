@@ -9,8 +9,17 @@ inputs:
     description: Base URL of the AFFiNE instance.
     required: true
   affine-token:
-    description: AFFiNE API token. Pass this from GitHub Secrets.
-    required: true
+    description: Legacy AFFiNE API token. Configure exactly one authentication method.
+    required: false
+  affine-cookie:
+    description: Complete AFFiNE Cookie request header. Configure exactly one authentication method.
+    required: false
+  affine-email:
+    description: Email for a dedicated self-hosted AFFiNE service account.
+    required: false
+  affine-password:
+    description: Password for the dedicated self-hosted AFFiNE service account.
+    required: false
   workspace-id:
     description: AFFiNE workspace UUID.
     required: true

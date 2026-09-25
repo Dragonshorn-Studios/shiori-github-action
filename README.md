@@ -55,7 +55,9 @@ Create repository variables:
 - `AFFINE_WORKSPACE_ID`
 - `AFFINE_ROOT_DOCUMENT_ID`
 
-Create the Actions secret `AFFINE_API_TOKEN`, then add this workflow:
+For current self-hosted AFFiNE, create a dedicated least-privilege service account and store its credentials as the Actions secrets `AFFINE_EMAIL` and `AFFINE_PASSWORD`. Shiori signs in once per run and keeps only the resulting session cookie in memory. Older deployments may instead use `AFFINE_API_TOKEN`, and an existing session may be supplied as `AFFINE_COOKIE`.
+
+Then add this workflow:
 
 Shiori enables the GitHub Pages shell by default. If the parent of `output-directory` already contains a Jekyll site or files you need to preserve—for the default `docs/brain`, that parent is `docs/`—set `pages: false`; Pages mode maintains files including `_config.yml`, `index.md`, and `_layouts/default.html` there.
 
@@ -81,7 +83,8 @@ jobs:
       - uses: Dragonshorn-Studios/shiori-github-action@v1
         with:
           affine-base-url: ${{ vars.AFFINE_BASE_URL }}
-          affine-token: ${{ secrets.AFFINE_API_TOKEN }}
+          affine-email: ${{ secrets.AFFINE_EMAIL }}
+          affine-password: ${{ secrets.AFFINE_PASSWORD }}
           workspace-id: ${{ vars.AFFINE_WORKSPACE_ID }}
           root-document-id: ${{ vars.AFFINE_ROOT_DOCUMENT_ID }}
       - uses: peter-evans/create-pull-request@v7
@@ -97,7 +100,7 @@ A complete copy is available at [`examples/sync-affine.yml`](examples/sync-affin
 ### Required AFFiNE setup
 
 1. Use a server-backed AFFiNE workspace. Browser-local-only workspaces are not available to a CI runner.
-2. Create a read-capable API token for the account/workspace and store it only as `AFFINE_API_TOKEN` in GitHub Actions secrets.
+2. Create a dedicated least-privilege account that can read the selected workspace. Store its credentials only as the `AFFINE_EMAIL` and `AFFINE_PASSWORD` GitHub Actions secrets.
 3. Make a root document for the repository knowledge you intend to disclose.
 4. Link its child documents, and link deeper descendants from those documents. Only this reachable, same-workspace graph is exported.
 5. Add the AFFiNE tag `skill` to any exported document that should also become an installable Agent Skill.
@@ -108,7 +111,10 @@ A complete copy is available at [`examples/sync-affine.yml`](examples/sync-affin
 | Input | Required | Default | Purpose |
 | --- | --- | --- | --- |
 | `affine-base-url` | yes | — | AFFiNE deployment origin |
-| `affine-token` | yes | — | Secret API token |
+| `affine-token` | conditional | — | Legacy API token for compatible AFFiNE deployments |
+| `affine-cookie` | conditional | — | Complete session Cookie header; expires and must be rotated by the caller |
+| `affine-email` | conditional | — | Dedicated self-hosted AFFiNE service-account email |
+| `affine-password` | conditional | — | Dedicated self-hosted AFFiNE service-account password |
 | `workspace-id` | yes | — | Source workspace |
 | `root-document-id` | yes | — | Root of the allowed linked subtree |
 | `output-directory` | no | `docs/brain` | Generated Markdown destination |
@@ -125,6 +131,8 @@ A complete copy is available at [`examples/sync-affine.yml`](examples/sync-affin
 | `plugin-directory` | no | `plugins` | Installable generated plugin packages |
 | `marketplace-name` | no | `shiori-knowledge` | Marketplace name used by Claude Code, ZCode, and Cursor |
 | `repository` | no | `GITHUB_REPOSITORY` | GitHub `owner/repository` used by Devin plugin metadata |
+
+Configure exactly one authentication method: `affine-token`, `affine-cookie`, or the `affine-email` + `affine-password` pair. Email/password is the recommended unattended option for current self-hosted AFFiNE because the legacy personal-access-token API was removed in AFFiNE 0.27+.
 
 The action exposes `document-count` and `skill-count` as outputs.
 
@@ -252,7 +260,7 @@ npm run build
 
 Tests use an in-memory fixture rather than a live AFFiNE workspace. They cover deterministic output, path/title sanitization, hierarchy conversion, manifest generation, same-origin/workspace subtree protection, output path containment, link rewriting, preservation of existing agent instructions, tag filtering, icon download validation, cross-agent skill packaging, and marketplace generation.
 
-For a manual live run, GitHub Actions maps input names from `action.yml` to environment variables named `INPUT_<NAME>` using uppercase letters and underscores in place of hyphens. For example, `affine-base-url` becomes `INPUT_AFFINE_BASE_URL`, `workspace-id` becomes `INPUT_WORKSPACE_ID`, and `root-document-id` becomes `INPUT_ROOT_DOCUMENT_ID`. Set the required variables plus `GITHUB_WORKSPACE` pointing to a disposable checkout, then run `node src/main.js`. Never point a development run at a directory containing irreplaceable generated output.
+For a manual live run, GitHub Actions maps input names from `action.yml` to environment variables named `INPUT_<NAME>`. Set the required source inputs, exactly one authentication method, and `GITHUB_WORKSPACE` pointing to a disposable checkout, then run `node src/main.js`. Never point a development run at a directory containing irreplaceable generated output.
 
 ## Architecture
 
@@ -266,7 +274,7 @@ There is no database, backend, account system, webhook service, RAG layer, or MC
 ## Current AFFiNE limitations
 
 - AFFiNE's external API and realtime/Yjs internals are not yet a documented stable export contract. The pinned CLI revision may need updating for a future AFFiNE release.
-- The token flow is intended primarily for compatible self-hosted deployments. AFFiNE Cloud and AFFiNE 0.27+ authentication behavior is evolving; current third-party research reports that Cloud may require browser-session authentication instead of programmatic API tokens.
+- AFFiNE 0.27+ removed the legacy personal-access-token API. Current self-hosted deployments should use a dedicated email/password account. AFFiNE Cloud may require a browser session cookie because its edge protection can block programmatic sign-in.
 - The MVP traverses explicit same-workspace document links. It does not decode the newer sidebar organize/folder subdocument. This is conservative and predictable, but a visually nested sidebar folder that is not represented by document links will not be exported.
 - Advanced AFFiNE block types may be lossy in Markdown because conversion fidelity is bounded by the source adapter.
 - Skill icons use AFFiNE's realtime/Yjs custom-property storage because the current GraphQL document metadata and Markdown export do not expose custom properties.
