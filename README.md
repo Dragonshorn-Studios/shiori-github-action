@@ -20,9 +20,9 @@ docs/brain/
 
 ## Why the source adapter is small
 
-AFFiNE does not currently document a stable bulk Markdown export API. Metadata is available through GraphQL, while document content is stored as Yjs data and normally read through AFFiNE's realtime protocol. Shiori isolates that detail behind `AffineCliSource` and pins a tested commit SHA of the community [`affine-cli`](https://github.com/tomohiro-owada/affine-cli), which already implements that protocol and Markdown conversion. The current pin is recorded in [`src/affine-cli-source.js`](src/affine-cli-source.js) so it cannot drift independently from the Action.
+AFFiNE does not currently document a stable bulk Markdown export API. Metadata is available through GraphQL, while document content is stored as Yjs data and normally read through AFFiNE's realtime protocol. Shiori isolates that detail behind `AffineMcpSource` and talks to a pinned release of [`affine-mcp-server`](https://github.com/DAWNCR0W/affine-mcp-server) over local MCP stdio. The MCP process is constrained to its read-only tool profile.
 
-The older official-community [`affine-reader`](https://github.com/toeverything/affine-reader) informed the model, but it targets a narrower cloud-oriented flow and exposes a refresh-token interface rather than the configured self-hosted base URL required here.
+By default the Action starts `affine-mcp-server@3.8.2` through `npx`; an existing `affine-mcp` executable can be supplied instead. No Go runtime or `affine-cli` installation is required.
 
 This boundary means a future official AFFiNE export API can replace one source adapter without changing paths, manifests, agent adapters, or Pages output.
 
@@ -33,7 +33,7 @@ The `root-document-id` is the explicit disclosure boundary. Shiori exports that 
 - point to the configured AFFiNE origin (or use an `affine:` URI whose path or query contains the workspace identity), and
 - contain the configured workspace ID.
 
-The `affine:` handling belongs to Shiori's link traversal, not `affine-cli`: Shiori extracts the same-workspace document ID from links such as `affine:///workspace/<workspace-id>/<doc-id>`, then asks the source adapter to export that ID.
+The `affine:` handling belongs to Shiori's link traversal: Shiori extracts the same-workspace document ID from links such as `affine:///workspace/<workspace-id>/<doc-id>`, then asks the MCP source adapter to read that ID.
 
 External links and links to another workspace are preserved but never fetched. `max-documents` provides a second explicit cap. Secrets are passed to the source command through environment variables and are never written to the manifest.
 
@@ -77,9 +77,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
       - uses: Dragonshorn-Studios/shiori-github-action@v1
         with:
           affine-base-url: ${{ vars.AFFINE_BASE_URL }}
@@ -121,8 +118,8 @@ A complete copy is available at [`examples/sync-affine.yml`](examples/sync-affin
 | `agent-file` | no | `AGENTS.md` | Thin managed agent bootstrap; empty disables it |
 | `pages` | no | `true` | Generate the Pages shell beside the output |
 | `max-documents` | no | `250` | Traversal safety cap |
-| `affine-cli` | no | `affine` | Existing CLI command: an absolute executable path or a command name available on the runner's `PATH`; when absent, `install-affine-cli` installs and locates the pinned CLI |
-| `install-affine-cli` | no | `true` | Install the pinned tested revision with Go if absent |
+| `affine-mcp-command` | no | — | Existing `affine-mcp` executable; empty uses the pinned npm package |
+| `affine-mcp-package` | no | `affine-mcp-server@3.8.2` | Exact npm package used when no command is supplied |
 | `skill-tag` | no | `skill` | Exact AFFiNE tag used to generate Agent Skills; empty disables generation |
 | `skill-icon-property` | no | `shiori-icon` | AFFiNE text custom property containing an absolute icon URL; empty disables icons |
 | `skill-icon-allowed-origins` | no | — | Comma-separated additional URL origins allowed for icons; the AFFiNE origin is always allowed |
@@ -264,7 +261,7 @@ For a manual live run, GitHub Actions maps input names from `action.yml` to envi
 
 ## Architecture
 
-- `AffineCliSource` fetches one normalized document at a time; `AffinePropertyReader` reads custom-property definitions and values from AFFiNE's dedicated WorkspaceDB subdocuments.
+- `AffineMcpSource` fetches normalized documents, tags, and custom properties through a local read-only MCP process.
 - `collectDocuments` enforces the bounded traversal and produces normalized documents.
 - The compiler assigns deterministic paths, rewrites internal links, and emits the index and manifest.
 - Thin output adapters maintain the managed `AGENTS.md` section, optional Jekyll shell, standards-compatible Agent Skills, and marketplace manifests.

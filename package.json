@@ -7,11 +7,10 @@
   "scripts": {
     "build": "ncc build src/main.js -o dist --minify",
     "test": "node --test",
-    "check": "node --check src/main.js && node --check src/compiler.js && node --check src/affine-auth.js && node --check src/affine-cli-source.js && node --check src/affine-properties.js && node --check src/icons.js && node --check src/skills.js"
+    "check": "node --check src/main.js && node --check src/compiler.js && node --check src/affine-auth.js && node --check src/affine-mcp-source.js && node --check src/icons.js && node --check src/skills.js"
   },
   "dependencies": {
-    "socket.io-client": "^4.8.1",
-    "yjs": "^13.6.27"
+    "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "devDependencies": {
     "@vercel/ncc": "^0.38.3"

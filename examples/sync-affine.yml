@@ -14,9 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
       - uses: Dragonshorn-Studios/shiori-github-action@v1
         with:
           affine-base-url: ${{ vars.AFFINE_BASE_URL }}
