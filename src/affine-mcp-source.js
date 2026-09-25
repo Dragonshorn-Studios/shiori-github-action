@@ -40,16 +40,13 @@ export class AffineMcpSource {
       includeMarkdown: true
     });
     if (document.exists === false) throw new Error(`AFFiNE document '${id}' does not exist.`);
-    const iconUrl = this.config.skillIconProperty
-      ? await this.getTextProperty(id, this.config.skillIconProperty)
-      : null;
     return {
       id,
       title: document.title || `Untitled ${id.slice(0, 8)}`,
       updatedAt: document.updatedAt ?? null,
       revision: document.revision ?? null,
       markdown: document.markdown ?? '',
-      properties: iconUrl ? { [this.config.skillIconProperty]: iconUrl } : {}
+      properties: {}
     };
   }
 
@@ -65,10 +62,16 @@ export class AffineMcpSource {
   }
 
   async getTextProperty(docId, propertyName) {
-    const result = await this.call('list_doc_properties', {
-      workspaceId: this.config.workspaceId,
-      docId
-    });
+    let result;
+    try {
+      result = await this.call('list_doc_properties', {
+        workspaceId: this.config.workspaceId,
+        docId
+      });
+    } catch (error) {
+      console.warn(`::warning::Unable to read optional AFFiNE property '${propertyName}' for '${docId}'; the skill will be generated without an icon. ${error.message}`);
+      return null;
+    }
     const normalized = propertyName.trim().toLowerCase();
     const matches = (result.properties ?? []).filter(property =>
       property.propertyId === propertyName || property.name?.trim().toLowerCase() === normalized

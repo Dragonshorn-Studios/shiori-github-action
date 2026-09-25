@@ -13,17 +13,28 @@ function sourceWith(responses) {
   return { calls, source: new AffineMcpSource({ workspaceId: 'ws', skillIconProperty: 'shiori-icon' }, client) };
 }
 
-test('reads rendered documents and text properties through MCP', async () => {
+test('reads rendered documents through MCP', async () => {
   const { source, calls } = sourceWith({
-    read_doc: { exists: true, title: 'Architecture', revision: 'rev', markdown: '# Architecture' },
-    list_doc_properties: { properties: [{ propertyId: 'icon-id', name: 'shiori-icon', type: 'text', value: 'https://example.test/icon.png', set: true }] }
+    read_doc: { exists: true, title: 'Architecture', revision: 'rev', markdown: '# Architecture' }
   });
   const doc = await source.getDocument('doc-1');
   assert.equal(doc.title, 'Architecture');
   assert.equal(doc.markdown, '# Architecture');
-  assert.equal(doc.properties['shiori-icon'], 'https://example.test/icon.png');
+  assert.deepEqual(doc.properties, {});
   assert.equal(calls[0].name, 'read_doc');
-  assert.equal(calls[1].name, 'list_doc_properties');
+});
+
+test('reads optional text properties through MCP', async () => {
+  const { source } = sourceWith({
+    list_doc_properties: { properties: [{ propertyId: 'icon-id', name: 'shiori-icon', type: 'text', value: 'https://example.test/icon.png', set: true }] }
+  });
+  assert.equal(await source.getTextProperty('doc-1', 'shiori-icon'), 'https://example.test/icon.png');
+});
+
+test('treats unavailable icon properties as optional', async () => {
+  const client = { async callTool() { return { isError: true, content: [{ type: 'text', text: 'permission denied' }] }; } };
+  const source = new AffineMcpSource({ workspaceId: 'ws' }, client);
+  assert.equal(await source.getTextProperty('doc-1', 'shiori-icon'), null);
 });
 
 test('lists only live tagged documents through MCP', async () => {
