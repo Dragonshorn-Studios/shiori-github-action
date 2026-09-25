@@ -42,7 +42,7 @@ async function main() {
     skillsDirectory: input('skills-directory', '.agents/skills'),
     pluginDirectory: input('plugin-directory', 'plugins'),
     marketplaceName: input('marketplace-name', 'shiori-knowledge'),
-    repository: input('repository', process.env.GITHUB_REPOSITORY ?? '').trim()
+    repository: input('repository').trim() || (process.env.GITHUB_REPOSITORY ?? '').trim()
   };
   if (!Number.isSafeInteger(config.maxDocuments) || config.maxDocuments < 1) throw new Error("Input 'max-documents' must be a positive integer.");
   if (!Number.isSafeInteger(config.skillIconMaxBytes) || config.skillIconMaxBytes < 1) throw new Error("Input 'skill-icon-max-bytes' must be a positive integer.");
