@@ -38,12 +38,12 @@ inputs:
   max-documents:
     description: Safety cap for documents reached from the configured root.
     default: "250"
-  affine-cli:
-    description: Absolute path or PATH command name for an existing affine-cli; automatic installation is used when absent and install-affine-cli is true.
-    default: affine
-  install-affine-cli:
-    description: Install the tested affine-cli revision with Go when it is absent.
-    default: "true"
+  affine-mcp-command:
+    description: Optional existing affine-mcp executable. Empty installs the pinned package through npx.
+    required: false
+  affine-mcp-package:
+    description: Pinned npm package used when affine-mcp-command is empty.
+    default: affine-mcp-server@3.8.2
   skill-tag:
     description: AFFiNE tag that marks exported documents for Agent Skill generation. Empty disables skills.
     default: skill

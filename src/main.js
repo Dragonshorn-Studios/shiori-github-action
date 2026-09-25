@@ -1,5 +1,5 @@
 import { compile } from './compiler.js';
-import { AffineCliSource } from './affine-cli-source.js';
+import { AffineMcpSource } from './affine-mcp-source.js';
 import { resolveAuth } from './affine-auth.js';
 
 function input(name, fallback = '') {
@@ -33,8 +33,8 @@ async function main() {
     agentFile: input('agent-file', 'AGENTS.md'),
     pages: booleanInput('pages', true),
     maxDocuments: Number.parseInt(input('max-documents', '250'), 10),
-    affineCli: input('affine-cli', 'affine'),
-    installAffineCli: booleanInput('install-affine-cli', true),
+    affineMcpCommand: input('affine-mcp-command').trim(),
+    affineMcpPackage: input('affine-mcp-package', 'affine-mcp-server@3.8.2').trim(),
     skillTag: input('skill-tag', 'skill').trim(),
     skillIconProperty: input('skill-icon-property', 'shiori-icon').trim(),
     skillIconAllowedOrigins: input('skill-icon-allowed-origins').split(',').map(value => value.trim()).filter(Boolean).map(value => new URL(value).origin),
@@ -50,7 +50,14 @@ async function main() {
   Object.assign(config, await resolveAuth(config));
   config.password = '';
   console.log('::group::Shiori — compiling AFFiNE knowledge');
-  const result = await compile(new AffineCliSource(config), config);
+  const source = new AffineMcpSource(config);
+  let result;
+  try {
+    await source.connect();
+    result = await compile(source, config);
+  } finally {
+    await source.close();
+  }
   console.log(`Exported ${result.documentCount} document(s) to ${config.outputDirectory}.`);
   if (config.skillTag) console.log(`Generated ${result.skillCount} Agent Skill(s) from AFFiNE tag '${config.skillTag}'.`);
   console.log('::endgroup::');
