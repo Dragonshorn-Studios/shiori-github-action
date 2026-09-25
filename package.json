@@ -7,7 +7,7 @@
   "scripts": {
     "build": "ncc build src/main.js -o dist --minify",
     "test": "node --test",
-    "check": "node --check src/main.js && node --check src/compiler.js && node --check src/affine-cli-source.js && node --check src/affine-properties.js && node --check src/icons.js && node --check src/skills.js"
+    "check": "node --check src/main.js && node --check src/compiler.js && node --check src/affine-auth.js && node --check src/affine-cli-source.js && node --check src/affine-properties.js && node --check src/icons.js && node --check src/skills.js"
   },
   "dependencies": {
     "socket.io-client": "^4.8.1",

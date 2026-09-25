@@ -24,6 +24,20 @@ test('downloads a same-origin AFFiNE icon with bearer authentication', async () 
   assert.deepEqual(result.bytes, png);
 });
 
+test('downloads a same-origin AFFiNE icon with session-cookie authentication', async () => {
+  let cookie;
+  await fetchSkillIcon('https://affine.example/api/icon', {
+    ...config,
+    token: '',
+    cookie: 'affine_session=session-value',
+    fetchImpl: async (_url, options) => {
+      cookie = options.headers.Cookie;
+      return new Response(png, { headers: { 'content-type': 'image/png' } });
+    }
+  });
+  assert.equal(cookie, 'affine_session=session-value');
+});
+
 test('rejects icon origins that were not explicitly allowed', async () => {
   await assert.rejects(() => fetchSkillIcon('https://cdn.example/icon.png', config), /not allowed/);
 });

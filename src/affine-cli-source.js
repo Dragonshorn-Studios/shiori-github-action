@@ -38,12 +38,20 @@ export class AffineCliSource {
   }
 
   run(args) {
+    const {
+      AFFINE_API_TOKEN: _inheritedToken,
+      AFFINE_COOKIE: _inheritedCookie,
+      AFFINE_EMAIL: _inheritedEmail,
+      AFFINE_PASSWORD: _inheritedPassword,
+      ...baseEnv
+    } = process.env;
     const env = {
-      ...process.env,
+      ...baseEnv,
       AFFINE_BASE_URL: this.config.baseUrl,
-      AFFINE_API_TOKEN: this.config.token,
       AFFINE_WORKSPACE_ID: this.config.workspaceId
     };
+    if (this.config.token) env.AFFINE_API_TOKEN = this.config.token;
+    if (this.config.cookie) env.AFFINE_COOKIE = this.config.cookie;
     const stdout = execFileSync(this.command, args, { encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 });
     try {
       return JSON.parse(stdout);

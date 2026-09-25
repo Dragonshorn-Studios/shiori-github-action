@@ -20,7 +20,8 @@ jobs:
       - uses: Dragonshorn-Studios/shiori-github-action@v1
         with:
           affine-base-url: ${{ vars.AFFINE_BASE_URL }}
-          affine-token: ${{ secrets.AFFINE_API_TOKEN }}
+          affine-email: ${{ secrets.AFFINE_EMAIL }}
+          affine-password: ${{ secrets.AFFINE_PASSWORD }}
           workspace-id: ${{ vars.AFFINE_WORKSPACE_ID }}
           root-document-id: ${{ vars.AFFINE_ROOT_DOCUMENT_ID }}
           skill-tag: skill
