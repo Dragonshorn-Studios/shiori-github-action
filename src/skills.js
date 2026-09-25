@@ -18,7 +18,12 @@ export async function generateSkills(documents, taggedIds, config) {
 
   for (const skill of skills) {
     const iconUrl = skill.document.properties?.[config.skillIconProperty] ?? null;
-    const icon = await fetchSkillIcon(iconUrl, config);
+    let icon = null;
+    try {
+      icon = await fetchSkillIcon(iconUrl, config);
+    } catch (error) {
+      console.warn(`::warning::Unable to download the optional icon for '${skill.document.title}'; continuing without it. ${error.message}`);
+    }
     const skillMd = renderSkill(skill);
     const reference = renderReference(skill.document);
     for (const root of projectSkillRoots(config)) {

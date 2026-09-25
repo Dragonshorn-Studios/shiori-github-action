@@ -96,18 +96,22 @@ export class AffineMcpSource {
   }
 }
 
-function mcpEnvironment(config) {
+export function mcpEnvironment(config) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([, value]) => typeof value === 'string'));
   delete env.AFFINE_API_TOKEN;
   delete env.AFFINE_COOKIE;
   delete env.AFFINE_EMAIL;
   delete env.AFFINE_PASSWORD;
+  const auth = config.token
+    ? { AFFINE_API_TOKEN: config.token }
+    : config.cookie
+      ? { AFFINE_COOKIE: config.cookie }
+      : { AFFINE_EMAIL: config.email, AFFINE_PASSWORD: config.password };
   return {
     ...env,
     AFFINE_BASE_URL: config.baseUrl,
     AFFINE_WORKSPACE_ID: config.workspaceId,
-    AFFINE_COOKIE: config.cookie || '',
-    AFFINE_API_TOKEN: config.token || '',
+    ...auth,
     AFFINE_TOOL_PROFILE: 'read_only',
     AFFINE_LOGIN_AT_START: 'sync'
   };

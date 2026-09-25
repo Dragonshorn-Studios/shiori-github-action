@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AffineMcpSource } from '../src/affine-mcp-source.js';
+import { AffineMcpSource, mcpEnvironment } from '../src/affine-mcp-source.js';
 
 function sourceWith(responses) {
   const calls = [];
@@ -46,4 +46,17 @@ test('falls back to JSON text results for compatible MCP servers', async () => {
   const client = { async callTool() { return { content: [{ type: 'text', text: '{"docs":[{"id":"doc"}]}' }] }; } };
   const source = new AffineMcpSource({ workspaceId: 'ws', skillIconProperty: '' }, client);
   assert.deepEqual(await source.listTaggedDocumentIds('skill'), ['doc']);
+});
+
+test('delegates email and password authentication directly to AFFiNE MCP', () => {
+  const env = mcpEnvironment({
+    baseUrl: 'https://affine.example',
+    workspaceId: 'ws',
+    email: 'shiori@example.test',
+    password: 'secret'
+  });
+  assert.equal(env.AFFINE_EMAIL, 'shiori@example.test');
+  assert.equal(env.AFFINE_PASSWORD, 'secret');
+  assert.equal(env.AFFINE_COOKIE, undefined);
+  assert.equal(env.AFFINE_API_TOKEN, undefined);
 });

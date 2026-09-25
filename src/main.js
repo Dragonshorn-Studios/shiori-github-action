@@ -1,6 +1,6 @@
 import { compile } from './compiler.js';
 import { AffineMcpSource } from './affine-mcp-source.js';
-import { resolveAuth } from './affine-auth.js';
+import { validateAuthConfig } from './affine-auth.js';
 
 function input(name, fallback = '') {
   const key = `INPUT_${name.replace(/ /g, '_').toUpperCase()}`;
@@ -47,13 +47,13 @@ async function main() {
   if (!Number.isSafeInteger(config.maxDocuments) || config.maxDocuments < 1) throw new Error("Input 'max-documents' must be a positive integer.");
   if (!Number.isSafeInteger(config.skillIconMaxBytes) || config.skillIconMaxBytes < 1) throw new Error("Input 'skill-icon-max-bytes' must be a positive integer.");
   new URL(config.baseUrl);
-  Object.assign(config, await resolveAuth(config));
-  config.password = '';
+  validateAuthConfig(config);
   console.log('::group::Shiori — compiling AFFiNE knowledge');
   const source = new AffineMcpSource(config);
   let result;
   try {
     await source.connect();
+    config.password = '';
     result = await compile(source, config);
   } finally {
     await source.close();
