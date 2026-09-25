@@ -16,6 +16,14 @@ export async function compile(source, config) {
   if (config.skillTag) {
     if (typeof source.listTaggedDocumentIds !== 'function') throw new Error('The configured knowledge source does not support AFFiNE tag discovery.');
     taggedIds = new Set(await source.listTaggedDocumentIds(config.skillTag));
+    if (config.skillIconProperty && typeof source.getTextProperty === 'function') {
+      for (const id of taggedIds) {
+        const document = documents.get(id);
+        if (!document) continue;
+        const iconUrl = await source.getTextProperty(id, config.skillIconProperty);
+        if (iconUrl) document.properties = { ...(document.properties ?? {}), [config.skillIconProperty]: iconUrl };
+      }
+    }
   }
   const written = [];
 
