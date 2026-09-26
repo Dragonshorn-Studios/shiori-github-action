@@ -79,5 +79,5 @@ outputs:
   agent-count:
     description: Number of tagged documents generated as specialized agents.
 runs:
-  using: node20
+  using: node24
   main: dist/index.js
