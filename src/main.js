@@ -36,6 +36,7 @@ async function main() {
     affineMcpCommand: input('affine-mcp-command').trim(),
     affineMcpPackage: input('affine-mcp-package', 'affine-mcp-server@3.8.2').trim(),
     skillTag: input('skill-tag', 'skill').trim(),
+    agentTag: input('agent-tag', 'agent').trim(),
     skillIconProperty: input('skill-icon-property', 'shiori-icon').trim(),
     skillIconAllowedOrigins: input('skill-icon-allowed-origins').split(',').map(value => value.trim()).filter(Boolean).map(value => new URL(value).origin),
     skillIconMaxBytes: Number.parseInt(input('skill-icon-max-bytes', '524288'), 10),
@@ -59,12 +60,13 @@ async function main() {
     await source.close();
   }
   console.log(`Exported ${result.documentCount} document(s) to ${config.outputDirectory}.`);
-  if (config.skillTag) console.log(`Generated ${result.skillCount} Agent Skill(s) from AFFiNE tag '${config.skillTag}'.`);
+  if (config.skillTag || config.agentTag) console.log(`Generated ${result.skillCount} portable Agent Skill adapter(s) from the configured skill and agent tags.`);
+  if (config.agentTag) console.log(`Generated ${result.agentCount} specialized agent(s) from AFFiNE tag '${config.agentTag}'.`);
   console.log('::endgroup::');
   const outputFile = process.env.GITHUB_OUTPUT;
   if (outputFile) {
     const { appendFile } = await import('node:fs/promises');
-    await appendFile(outputFile, `document-count=${result.documentCount}\nskill-count=${result.skillCount}\n`, 'utf8');
+    await appendFile(outputFile, `document-count=${result.documentCount}\nskill-count=${result.skillCount}\nagent-count=${result.agentCount}\n`, 'utf8');
   }
 }
 

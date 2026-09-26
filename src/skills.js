@@ -7,13 +7,17 @@ const STATE_FILE = '.shiori/generated-skills.json';
 const GENERATED_PLUGIN_PREFIX = 'shiori-';
 const AGGREGATE_PLUGIN_NAME = 'shiori';
 
-export async function generateSkills(documents, taggedIds, config) {
+export async function generateSkills(documents, taggedIds, config, agentTaggedIds = new Set()) {
   const tagged = [...taggedIds]
     .filter(id => documents.has(id))
     .map(id => documents.get(id))
     .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
 
   const skills = assignSkillNames(tagged);
+  const agents = assignSkillNames([...agentTaggedIds]
+    .filter(id => documents.has(id))
+    .map(id => documents.get(id))
+    .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id)));
   await removePreviousGeneratedFiles(config.repositoryRoot);
   const generatedFiles = [];
   const pluginRoot = `${config.pluginDirectory}/${AGGREGATE_PLUGIN_NAME}`;
@@ -49,6 +53,12 @@ export async function generateSkills(documents, taggedIds, config) {
     await writeGenerated(config.repositoryRoot, `${pluginRoot}/skills/${skill.name}/references/source.md`, reference, generatedFiles);
   }
 
+  for (const agent of agents) {
+    const agentMd = renderAgent(agent);
+    await writeGenerated(config.repositoryRoot, `.claude/agents/${agent.name}.md`, agentMd, generatedFiles);
+    await writeGenerated(config.repositoryRoot, `${pluginRoot}/agents/${agent.name}.md`, agentMd, generatedFiles);
+  }
+
   const plugin = { name: AGGREGATE_PLUGIN_NAME, icon: pluginIcon };
   await writeGenerated(config.repositoryRoot, `${pluginRoot}/.codex-plugin/plugin.json`, stableJson(codexPluginManifest(plugin, config)), generatedFiles);
   await writeGenerated(config.repositoryRoot, `${pluginRoot}/.claude-plugin/plugin.json`, stableJson(pluginManifest(config)), generatedFiles);
@@ -59,8 +69,14 @@ export async function generateSkills(documents, taggedIds, config) {
   await updateCursorMarketplace(plugin, config);
   await updateZcodeMarketplace(plugin, config);
   await updateDevinMarketplace(config);
-  await writeGenerated(config.repositoryRoot, STATE_FILE, stableJson({ schemaVersion: 2, tag: config.skillTag, iconProperty: config.skillIconProperty || null, files: generatedFiles.sort() }), []);
-  return { count: skills.length, skills };
+  await writeGenerated(config.repositoryRoot, STATE_FILE, stableJson({
+    schemaVersion: 3,
+    tag: config.skillTag,
+    agentTag: config.agentTag || null,
+    iconProperty: config.skillIconProperty || null,
+    files: generatedFiles.sort()
+  }), []);
+  return { count: skills.length, agentCount: agents.length, skills, agents };
 }
 
 function assignSkillNames(documents) {
@@ -89,6 +105,18 @@ function projectSkillRoots(config) {
 function renderSkill({ name, document }) {
   const description = `Use when a task involves ${document.title} or needs the corresponding AFFiNE-sourced project workflow and constraints.`;
   return `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n\n# ${document.title}\n\n## When to use\n\nUse this skill when the task touches **${document.title}** or when its project-specific decisions and workflow are relevant.\n\n## Instructions\n\n1. Read [the generated AFFiNE reference](references/source.md) before planning or changing code.\n2. Apply the requirements, invariants, decisions, and workflow from that reference that are relevant to the task.\n3. If current repository behavior or explicit user direction conflicts with the reference, surface the conflict instead of silently choosing one.\n4. AFFiNE is canonical. Do not edit this generated skill or its reference by hand.\n`;
+}
+
+function renderAgent({ name, document }) {
+  const description = agentDescription(document);
+  return `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n\n${normalizeMarkdown(document.markdown)}`;
+}
+
+function agentDescription(document) {
+  const quoted = String(document.markdown ?? '').split(/\r?\n/)
+    .map(line => line.match(/^>\s*(.+)$/)?.[1]?.trim())
+    .find(Boolean);
+  return (quoted || `Use when a task needs the ${document.title} specialist.`).slice(0, 1024);
 }
 
 function renderReference(document) {
@@ -144,7 +172,8 @@ function zcodePluginManifest(config) {
     ...pluginManifest(config),
     license: 'MIT',
     keywords: ['shiori', 'affine', 'project-knowledge'],
-    skills: 'skills'
+    skills: 'skills',
+    agents: 'agents'
   };
 }
 

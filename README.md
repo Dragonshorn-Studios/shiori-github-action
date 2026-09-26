@@ -14,7 +14,8 @@ docs/brain/
   ├─ hierarchy-derived Markdown paths
   └─ manifest.json
        ├─ AGENTS.md bootstrap
-       ├─ tagged Agent Skills + plugin marketplaces
+       ├─ tagged Agent Skills + specialized review agents
+       ├─ plugin marketplaces
        └─ GitHub Pages
 ```
 
@@ -101,7 +102,8 @@ A complete copy is available at [`examples/sync-affine.yml`](examples/sync-affin
 3. Make a root document for the repository knowledge you intend to disclose.
 4. Link its child documents, and link deeper descendants from those documents. Only this reachable, same-workspace graph is exported.
 5. Add the AFFiNE tag `skill` to any exported document that should also become an installable Agent Skill.
-6. Copy the workspace and root document IDs from their AFFiNE URLs.
+6. Add the AFFiNE tag `agent` to documents that define a specialized agent. Agent documents are also emitted as portable skills for hosts without native subagents.
+7. Copy the workspace and root document IDs from their AFFiNE URLs.
 
 ### Action inputs
 
@@ -121,6 +123,7 @@ A complete copy is available at [`examples/sync-affine.yml`](examples/sync-affin
 | `affine-mcp-command` | no | — | Existing `affine-mcp` executable; empty uses the pinned npm package |
 | `affine-mcp-package` | no | `affine-mcp-server@3.8.2` | Exact npm package used when no command is supplied |
 | `skill-tag` | no | `skill` | Exact AFFiNE tag used to generate Agent Skills; empty disables generation |
+| `agent-tag` | no | `agent` | Exact AFFiNE tag used to generate specialized agents plus portable skill adapters; empty disables generation |
 | `skill-icon-property` | no | `shiori-icon` | AFFiNE text custom property containing an absolute icon URL; empty disables icons |
 | `skill-icon-allowed-origins` | no | — | Comma-separated additional URL origins allowed for icons; the AFFiNE origin is always allowed |
 | `skill-icon-max-bytes` | no | `524288` | Maximum downloaded icon size in bytes |
@@ -131,7 +134,7 @@ A complete copy is available at [`examples/sync-affine.yml`](examples/sync-affin
 
 Configure exactly one authentication method: `affine-token`, `affine-cookie`, or the `affine-email` + `affine-password` pair. Email/password is the recommended unattended option for current self-hosted AFFiNE because the legacy personal-access-token API was removed in AFFiNE 0.27+.
 
-The action exposes `document-count` and `skill-count` as outputs.
+The action exposes `document-count`, `skill-count`, and `agent-count` as outputs.
 
 ```yaml
 - id: shiori
@@ -139,7 +142,7 @@ The action exposes `document-count` and `skill-count` as outputs.
   with:
     # ...same inputs as in Quick start
 - run: |
-    echo "Exported ${{ steps.shiori.outputs.document-count }} docs, ${{ steps.shiori.outputs.skill-count }} skills"
+    echo "Exported ${{ steps.shiori.outputs.document-count }} docs, ${{ steps.shiori.outputs.skill-count }} skills, ${{ steps.shiori.outputs.agent-count }} agents"
 ```
 
 ## Tagged documents become Agent Skills
@@ -221,6 +224,21 @@ Cursor receives the repository-local `logo` path. ZCode receives a public `raw.g
 
 Cursor, Codex, Vibe, and compatible cloud agents can use the committed project-local directories immediately. The marketplace JSON files preserve non-Shiori entries and replace only plugin sources under the configured `plugins/shiori-*` namespace.
 
+## Tagged documents become specialized agents
+
+When an exported AFFiNE document has the configured `agent` tag, Shiori treats the document as the canonical system prompt for a specialist. The first blockquote becomes the routing description; the document title becomes the stable, sanitized agent name.
+
+Shiori emits native subagents where the host has a documented portable format:
+
+| Host | Generated path |
+| --- | --- |
+| Claude Code project | `.claude/agents/<name>.md` |
+| Claude Code and ZCode plugin | `plugins/shiori/agents/<name>.md` |
+
+The generated ZCode manifest declares the plugin `agents` directory. Claude Code discovers the same directory through its plugin layout. Each `agent` document is also emitted through every Agent Skill adapter listed above, so Codex-compatible tools, Cursor, Windsurf, Vibe, Devin, and other skill hosts receive the same specialist instructions without Shiori inventing unsupported subagent paths.
+
+Keep agent documents narrowly scoped. Their first blockquote should say exactly when the host should delegate to them, and their body should define the procedure, finding threshold, output contract, and mutation limits. AFFiNE remains canonical; generated agent and skill files must not be edited by hand.
+
 ## Deterministic output
 
 Titles are Unicode-normalized and sanitized into lowercase paths. The first hierarchy path discovered from the root is canonical; collisions receive a stable source-ID suffix. Line endings, index order, manifest keys, links, and trailing newlines are normalized. The manifest records source identity, revision/update metadata, output path, and a SHA-256 content digest. It intentionally contains no generated timestamp, so an unchanged AFFiNE tree produces no Git diff.
@@ -229,7 +247,7 @@ Every sync replaces the configured output directory. Do not put hand-written fil
 
 When Pages output is enabled, Shiori also maintains `docs/_config.yml`, `docs/index.md`, `docs/_data/shiori-nav.yml`, `docs/_layouts/default.html`, `docs/_includes/nav.html`, and `docs/assets/css/shiori.css`. Disable `pages` if those paths belong to an existing documentation site.
 
-Skill generation maintains only the files listed in `.shiori/generated-skills.json`, plus the Shiori entries in the four root marketplace manifests. Existing non-Shiori marketplace entries are preserved.
+Skill and agent generation maintains only the files listed in `.shiori/generated-skills.json`, plus the Shiori entries in the four root marketplace manifests. Existing non-Shiori marketplace entries are preserved.
 
 Shiori updates only the section between `<!-- shiori:start -->` and `<!-- shiori:end -->` in `AGENTS.md`, preserving repository-specific instructions outside it.
 
@@ -264,7 +282,7 @@ For a manual live run, GitHub Actions maps input names from `action.yml` to envi
 - `AffineMcpSource` fetches normalized documents, tags, and custom properties through a local read-only MCP process.
 - `collectDocuments` enforces the bounded traversal and produces normalized documents.
 - The compiler assigns deterministic paths, rewrites internal links, and emits the index and manifest.
-- Thin output adapters maintain the managed `AGENTS.md` section, optional Jekyll shell, standards-compatible Agent Skills, and marketplace manifests.
+- Thin output adapters maintain the managed `AGENTS.md` section, optional Jekyll shell, standards-compatible Agent Skills, native Claude/ZCode subagents, and marketplace manifests.
 
 There is no database, backend, account system, webhook service, RAG layer, or MCP server.
 

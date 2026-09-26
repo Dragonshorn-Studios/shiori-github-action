@@ -12,12 +12,19 @@ export async function compile(source, config) {
   const outputRoot = safeRepositoryPath(config.repositoryRoot, config.outputDirectory);
   const documents = await collectDocuments(source, config);
   const pathById = assignPaths(documents, config.rootDocumentId);
-  let taggedIds = new Set();
-  if (config.skillTag) {
+  let skillTaggedIds = new Set();
+  let agentTaggedIds = new Set();
+  if (config.skillTag || config.agentTag) {
     if (typeof source.listTaggedDocumentIds !== 'function') throw new Error('The configured knowledge source does not support AFFiNE tag discovery.');
-    taggedIds = new Set(await source.listTaggedDocumentIds(config.skillTag));
+    if (config.skillTag) skillTaggedIds = new Set(await source.listTaggedDocumentIds(config.skillTag));
+    if (config.agentTag) {
+      agentTaggedIds = config.agentTag === config.skillTag
+        ? new Set(skillTaggedIds)
+        : new Set(await source.listTaggedDocumentIds(config.agentTag));
+    }
+    const packagedIds = new Set([...skillTaggedIds, ...agentTaggedIds]);
     if (config.skillIconProperty && typeof source.getTextProperty === 'function') {
-      for (const id of taggedIds) {
+      for (const id of packagedIds) {
         const document = documents.get(id);
         if (!document) continue;
         const iconUrl = await source.getTextProperty(id, config.skillIconProperty);
@@ -41,7 +48,7 @@ export async function compile(source, config) {
   const readme = `---\nlayout: default\ntitle: Archive index\n---\n\n${renderIndex(documents, pathById, config.rootDocumentId)}`;
   await write(outputRoot, 'README.md', readme);
 
-  const manifest = createManifest(written, config, taggedIds);
+  const manifest = createManifest(written, config, skillTaggedIds, agentTaggedIds);
   await write(outputRoot, 'manifest.json', stableJson(manifest));
 
   if (config.agentFile) await updateAgentFile(config);
@@ -50,11 +57,14 @@ export async function compile(source, config) {
     await writePagesShell(config, outputRoot);
   }
   let skillCount = 0;
-  if (config.skillTag) {
-    const generated = await generateSkills(documents, taggedIds, config);
+  let agentCount = 0;
+  if (config.skillTag || config.agentTag) {
+    const packagedIds = new Set([...skillTaggedIds, ...agentTaggedIds]);
+    const generated = await generateSkills(documents, packagedIds, config, agentTaggedIds);
     skillCount = generated.count;
+    agentCount = generated.agentCount;
   }
-  return { documentCount: documents.size, skillCount, outputRoot, manifest };
+  return { documentCount: documents.size, skillCount, agentCount, outputRoot, manifest };
 }
 
 export async function collectDocuments(source, config) {
@@ -96,7 +106,7 @@ export function assignPaths(documents, rootId) {
   return paths;
 }
 
-function createManifest(written, config, taggedIds) {
+function createManifest(written, config, skillTaggedIds, agentTaggedIds) {
   return {
     schemaVersion: 1,
     generator: 'shiori',
@@ -107,6 +117,7 @@ function createManifest(written, config, taggedIds) {
       rootDocumentId: config.rootDocumentId,
       traversal: 'same-workspace-links',
       skillTag: config.skillTag || null,
+      agentTag: config.agentTag || null,
       skillIconProperty: config.skillIconProperty || null
     },
     documents: written.sort((a, b) => a.path.localeCompare(b.path)).map(({ document, path, content }) => ({
@@ -115,7 +126,8 @@ function createManifest(written, config, taggedIds) {
       title: document.title,
       revision: document.revision,
       updatedAt: document.updatedAt,
-      skill: taggedIds.has(document.id),
+      skill: skillTaggedIds.has(document.id) || agentTaggedIds.has(document.id),
+      agent: agentTaggedIds.has(document.id),
       sha256: sha256(content)
     }))
   };
