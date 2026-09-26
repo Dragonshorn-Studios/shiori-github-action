@@ -5,6 +5,7 @@ import { normalizeMarkdown, slugify, stableJson } from './model.js';
 
 const STATE_FILE = '.shiori/generated-skills.json';
 const GENERATED_PLUGIN_PREFIX = 'shiori-';
+const AGGREGATE_PLUGIN_NAME = 'shiori';
 
 export async function generateSkills(documents, taggedIds, config) {
   const tagged = [...taggedIds]
@@ -15,14 +16,27 @@ export async function generateSkills(documents, taggedIds, config) {
   const skills = assignSkillNames(tagged);
   await removePreviousGeneratedFiles(config.repositoryRoot);
   const generatedFiles = [];
+  const pluginRoot = `${config.pluginDirectory}/${AGGREGATE_PLUGIN_NAME}`;
+  let pluginIcon = null;
 
   for (const skill of skills) {
     const iconUrl = skill.document.properties?.[config.skillIconProperty] ?? null;
-    let icon = null;
-    try {
-      icon = await fetchSkillIcon(iconUrl, config);
-    } catch (error) {
-      console.warn(`::warning::Unable to download the optional icon for '${skill.document.title}'; continuing without it. ${error.message}`);
+    if (!pluginIcon && iconUrl) {
+      try {
+        const icon = await fetchSkillIcon(iconUrl, config);
+        if (icon) {
+          const relativePath = `assets/icon.${icon.extension}`;
+          const repositoryPath = `${pluginRoot}/${relativePath}`;
+          pluginIcon = {
+            relativePath,
+            repositoryPath,
+            publicUrl: config.repository ? rawGitHubUrl(config.repository, repositoryPath) : undefined
+          };
+          await writeGeneratedBuffer(config.repositoryRoot, repositoryPath, icon.bytes, generatedFiles);
+        }
+      } catch (error) {
+        console.warn(`::warning::Unable to download the optional Shiori plugin icon from '${skill.document.title}'; continuing without it. ${error.message}`);
+      }
     }
     const skillMd = renderSkill(skill);
     const reference = renderReference(skill.document);
@@ -31,29 +45,20 @@ export async function generateSkills(documents, taggedIds, config) {
       await writeGenerated(config.repositoryRoot, `${root}/${skill.name}/references/source.md`, reference, generatedFiles);
     }
 
-    const pluginRoot = `${config.pluginDirectory}/${skill.pluginName}`;
-    if (icon) {
-      const relativePath = `assets/icon.${icon.extension}`;
-      const repositoryPath = `${pluginRoot}/${relativePath}`;
-      skill.icon = {
-        relativePath,
-        repositoryPath,
-        publicUrl: config.repository ? rawGitHubUrl(config.repository, repositoryPath) : undefined
-      };
-      await writeGeneratedBuffer(config.repositoryRoot, repositoryPath, icon.bytes, generatedFiles);
-    }
     await writeGenerated(config.repositoryRoot, `${pluginRoot}/skills/${skill.name}/SKILL.md`, skillMd, generatedFiles);
     await writeGenerated(config.repositoryRoot, `${pluginRoot}/skills/${skill.name}/references/source.md`, reference, generatedFiles);
-    await writeGenerated(config.repositoryRoot, `${pluginRoot}/.claude-plugin/plugin.json`, stableJson(pluginManifest(skill, config)), generatedFiles);
-    await writeGenerated(config.repositoryRoot, `${pluginRoot}/.cursor-plugin/plugin.json`, stableJson(cursorPluginManifest(skill, config)), generatedFiles);
-    await writeGenerated(config.repositoryRoot, `${pluginRoot}/.zcode-plugin/plugin.json`, stableJson(zcodePluginManifest(skill, config)), generatedFiles);
-    await writeGenerated(config.repositoryRoot, `${pluginRoot}/.devin-plugin/plugin.json`, stableJson(devinPluginManifest(skill, config)), generatedFiles);
   }
 
-  await updateClaudeMarketplace(skills, config);
-  await updateCursorMarketplace(skills, config);
-  await updateZcodeMarketplace(skills, config);
-  await updateDevinMarketplace(skills, config);
+  const plugin = { name: AGGREGATE_PLUGIN_NAME, icon: pluginIcon };
+  await writeGenerated(config.repositoryRoot, `${pluginRoot}/.codex-plugin/plugin.json`, stableJson(codexPluginManifest(plugin, config)), generatedFiles);
+  await writeGenerated(config.repositoryRoot, `${pluginRoot}/.claude-plugin/plugin.json`, stableJson(pluginManifest(config)), generatedFiles);
+  await writeGenerated(config.repositoryRoot, `${pluginRoot}/.cursor-plugin/plugin.json`, stableJson(cursorPluginManifest(plugin, config)), generatedFiles);
+  await writeGenerated(config.repositoryRoot, `${pluginRoot}/.zcode-plugin/plugin.json`, stableJson(zcodePluginManifest(config)), generatedFiles);
+  await writeGenerated(config.repositoryRoot, `${pluginRoot}/.devin-plugin/plugin.json`, stableJson(devinPluginManifest(config)), generatedFiles);
+  await updateClaudeMarketplace(plugin, config);
+  await updateCursorMarketplace(plugin, config);
+  await updateZcodeMarketplace(plugin, config);
+  await updateDevinMarketplace(config);
   await writeGenerated(config.repositoryRoot, STATE_FILE, stableJson({ schemaVersion: 2, tag: config.skillTag, iconProperty: config.skillIconProperty || null, files: generatedFiles.sort() }), []);
   return { count: skills.length, skills };
 }
@@ -65,7 +70,7 @@ function assignSkillNames(documents) {
     let name = base;
     if (used.has(name)) name = `${base.slice(0, 47).replace(/-+$/g, '')}-${slugify(document.id).slice(0, 8)}`;
     used.add(name);
-    return { name, pluginName: `${GENERATED_PLUGIN_PREFIX}${name}`, document };
+    return { name, document };
   });
 }
 
@@ -76,7 +81,8 @@ function projectSkillRoots(config) {
     '.cursor/skills',
     '.windsurf/skills',
     '.vibe/skills',
-    '.devin/skills'
+    '.devin/skills',
+    'skills'
   ].map(path => path.replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/$/, '')))];
 }
 
@@ -89,51 +95,72 @@ function renderReference(document) {
   return `# ${document.title}\n\n> Generated by Shiori from AFFiNE document \`${document.id}\`. AFFiNE is canonical.\n\n${normalizeMarkdown(document.markdown)}`;
 }
 
-function pluginManifest(skill, config) {
+function pluginManifest(config) {
   return {
-    name: skill.pluginName,
+    name: AGGREGATE_PLUGIN_NAME,
     version: '1.0.0',
-    description: `AFFiNE-sourced Agent Skill for ${skill.document.title}.`,
+    description: 'AFFiNE-sourced shared coding-agent brain generated by Shiori.',
     author: { name: 'Shiori' },
     repository: config.repository ? `https://github.com/${config.repository}` : undefined
   };
 }
 
-function cursorPluginManifest(skill, config) {
+function codexPluginManifest(plugin, config) {
   return {
-    name: skill.pluginName,
-    displayName: `Shiori: ${skill.document.title}`,
-    version: '1.0.0',
-    description: `AFFiNE-sourced Agent Skill for ${skill.document.title}.`,
-    author: { name: 'Shiori' },
-    license: 'MIT',
-    keywords: ['shiori', 'affine', 'project-knowledge'],
-    logo: skill.icon?.relativePath
+    ...pluginManifest(config),
+    skills: './skills/',
+    interface: {
+      displayName: 'Shiori',
+      shortDescription: 'Shared coding-agent knowledge from AFFiNE.',
+      longDescription: 'Dragonshorn Studios shared engineering rules and reusable workflows, synchronized from AFFiNE by Shiori.',
+      developerName: 'Dragonshorn Studios',
+      category: 'Productivity',
+      capabilities: ['Instructions'],
+      defaultPrompt: [
+        'Apply the relevant Shiori engineering guidance.',
+        'Use a Shiori workflow skill for this task.'
+      ],
+      composerIcon: plugin.icon?.relativePath,
+      logo: plugin.icon?.relativePath
+    }
   };
 }
 
-function zcodePluginManifest(skill, config) {
+function cursorPluginManifest(plugin, config) {
   return {
-    ...pluginManifest(skill, config),
+    name: AGGREGATE_PLUGIN_NAME,
+    displayName: 'Shiori',
+    version: '1.0.0',
+    description: 'AFFiNE-sourced shared coding-agent brain generated by Shiori.',
+    author: { name: 'Shiori' },
+    license: 'MIT',
+    keywords: ['shiori', 'affine', 'project-knowledge'],
+    logo: plugin.icon?.relativePath
+  };
+}
+
+function zcodePluginManifest(config) {
+  return {
+    ...pluginManifest(config),
     license: 'MIT',
     keywords: ['shiori', 'affine', 'project-knowledge'],
     skills: 'skills'
   };
 }
 
-function devinPluginManifest(skill, config) {
+function devinPluginManifest(config) {
   return {
-    ...pluginManifest(skill, config),
+    ...pluginManifest(config),
     license: 'MIT',
     keywords: ['shiori', 'affine', 'project-knowledge']
   };
 }
 
-async function updateClaudeMarketplace(skills, config) {
+async function updateClaudeMarketplace(plugin, config) {
   const path = '.claude-plugin/marketplace.json';
   const existing = await readJson(config.repositoryRoot, path, {});
   const plugins = Array.isArray(existing.plugins) ? existing.plugins.filter(item => !isGeneratedPluginSource(item?.source, config)) : [];
-  plugins.push(...skills.map(skill => marketplaceEntry(skill, config)));
+  plugins.push(marketplaceEntry(plugin, config));
   const value = {
     ...existing,
     $schema: existing.$schema ?? 'https://anthropic.com/claude-code/marketplace.schema.json',
@@ -145,11 +172,11 @@ async function updateClaudeMarketplace(skills, config) {
   await writeDirect(config.repositoryRoot, path, stableJson(value));
 }
 
-async function updateCursorMarketplace(skills, config) {
+async function updateCursorMarketplace(plugin, config) {
   const path = '.cursor-plugin/marketplace.json';
   const existing = await readJson(config.repositoryRoot, path, {});
   const plugins = Array.isArray(existing.plugins) ? existing.plugins.filter(item => !isGeneratedPluginSource(item?.source, config)) : [];
-  plugins.push(...skills.map(skill => ({ name: skill.pluginName, source: `./${config.pluginDirectory}/${skill.pluginName}`, description: `AFFiNE-sourced Agent Skill for ${skill.document.title}.` })));
+  plugins.push({ name: plugin.name, source: `./${config.pluginDirectory}/${plugin.name}`, description: 'AFFiNE-sourced shared coding-agent brain generated by Shiori.' });
   const value = {
     ...existing,
     name: existing.name ?? config.marketplaceName,
@@ -160,19 +187,19 @@ async function updateCursorMarketplace(skills, config) {
   await writeDirect(config.repositoryRoot, path, stableJson(value));
 }
 
-async function updateZcodeMarketplace(skills, config) {
+async function updateZcodeMarketplace(plugin, config) {
   const path = 'marketplace.json';
   const existing = await readJson(config.repositoryRoot, path, {});
   const plugins = Array.isArray(existing.plugins) ? existing.plugins.filter(item => !isGeneratedPluginSource(item?.source, config)) : [];
-  plugins.push(...skills.map(skill => ({
-    name: skill.pluginName,
-    source: `./${config.pluginDirectory}/${skill.pluginName}`,
-    description: `AFFiNE-sourced Agent Skill for ${skill.document.title}.`,
+  plugins.push({
+    name: plugin.name,
+    source: `./${config.pluginDirectory}/${plugin.name}`,
+    description: 'AFFiNE-sourced shared coding-agent brain generated by Shiori.',
     version: '1.0.0',
     category: 'productivity',
     tags: ['shiori', 'affine', 'skill'],
-    icon: skill.icon?.publicUrl
-  })));
+    icon: plugin.icon?.publicUrl
+  });
   const value = {
     ...existing,
     name: existing.name ?? config.marketplaceName,
@@ -182,44 +209,38 @@ async function updateZcodeMarketplace(skills, config) {
   await writeDirect(config.repositoryRoot, path, stableJson(value));
 }
 
-async function updateDevinMarketplace(skills, config) {
+async function updateDevinMarketplace(config) {
   const path = '.devin-plugin/plugin.json';
   const existing = await readJson(config.repositoryRoot, path, {});
   const requiredPlugins = Array.isArray(existing.requiredPlugins)
     ? existing.requiredPlugins.filter(item => !String(item?.path ?? '').startsWith(`${config.pluginDirectory}/${GENERATED_PLUGIN_PREFIX}`))
     : [];
-  if (config.repository) {
-    requiredPlugins.push(...skills.map(skill => ({
-      source: 'git-subdir',
-      url: `https://github.com/${config.repository}`,
-      path: `${config.pluginDirectory}/${skill.pluginName}`
-    })));
-  }
   const value = {
     ...existing,
-    name: existing.name ?? config.marketplaceName,
+    name: AGGREGATE_PLUGIN_NAME,
     version: existing.version ?? '1.0.0',
-    description: existing.description ?? 'Meta-plugin for AFFiNE-sourced project skills generated by Shiori.',
+    description: 'AFFiNE-sourced shared coding-agent brain generated by Shiori.',
     author: existing.author ?? { name: config.repository?.split('/')[0] || 'Shiori' },
     requiredPlugins
   };
   await writeDirect(config.repositoryRoot, path, stableJson(value));
 }
 
-function marketplaceEntry(skill, config) {
+function marketplaceEntry(plugin, config) {
   return {
-    name: skill.pluginName,
-    description: `AFFiNE-sourced Agent Skill for ${skill.document.title}.`,
+    name: plugin.name,
+    description: 'AFFiNE-sourced shared coding-agent brain generated by Shiori.',
     author: { name: 'Shiori' },
-    source: `./${config.pluginDirectory}/${skill.pluginName}`,
+    source: `./${config.pluginDirectory}/${plugin.name}`,
     category: 'productivity',
     version: '1.0.0'
   };
 }
 
 function isGeneratedPluginSource(source, config) {
-  if (typeof source === 'string') return source.startsWith(`./${config.pluginDirectory}/${GENERATED_PLUGIN_PREFIX}`);
-  return String(source?.path ?? '').startsWith(`${config.pluginDirectory}/${GENERATED_PLUGIN_PREFIX}`);
+  const path = String(typeof source === 'string' ? source : source?.path ?? '').replace(/^\.\//, '');
+  const base = `${config.pluginDirectory}/${AGGREGATE_PLUGIN_NAME}`;
+  return path === base || path.startsWith(`${config.pluginDirectory}/${GENERATED_PLUGIN_PREFIX}`);
 }
 
 function rawGitHubUrl(repository, path) {
