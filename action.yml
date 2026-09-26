@@ -68,6 +68,9 @@ inputs:
   marketplace-name:
     description: Name used by generated Claude Code, ZCode, and Cursor marketplace catalogs.
     default: shiori-knowledge
+  plugin-version:
+    description: Semantic version written to every generated plugin and marketplace manifest.
+    default: 1.1.0
   repository:
     description: GitHub owner/repository used by Devin install metadata; defaults to GITHUB_REPOSITORY.
     required: false

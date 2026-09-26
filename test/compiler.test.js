@@ -114,6 +114,7 @@ test('turns only exported tagged documents into cross-agent skills, native agent
     skillsDirectory: '.agents/skills',
     pluginDirectory: 'plugins',
     marketplaceName: 'project-knowledge',
+    pluginVersion: '1.1.0',
     repository: 'example/project',
     skillIconProperty: 'shiori-icon',
     skillIconAllowedOrigins: [],
@@ -144,12 +145,18 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(canonical, /references\/source\.md/);
   assert.match(reference, /See \[Decision\]/);
   assert.deepEqual(claudeMarketplace.plugins.map(item => item.name), ['handwritten', 'shiori']);
+  assert.equal(claudeMarketplace.plugins.at(-1).version, '1.1.0');
   assert.deepEqual(cursorMarketplace.plugins.map(item => item.name), ['shiori']);
+  assert.equal(cursorMarketplace.metadata.version, '1.1.0');
   assert.equal(cursorPlugin.logo, 'assets/icon.png');
+  assert.equal(cursorPlugin.version, '1.1.0');
   assert.equal(zcodePlugin.skills, 'skills');
   assert.equal(zcodePlugin.agents, 'agents');
   assert.equal(codexPlugin.skills, './skills/');
   assert.equal(zcodeMarketplace.plugins[0].icon, 'https://raw.githubusercontent.com/example/project/HEAD/plugins/shiori/assets/icon.png');
+  assert.equal(zcodeMarketplace.plugins[0].version, '1.1.0');
+  assert.equal(codexPlugin.version, '1.1.0');
+  assert.equal(devinPlugin.version, '1.1.0');
   assert.deepEqual(devinPlugin.requiredPlugins, []);
   assert.match(claudeAgent, /name: architecture-apis/);
   assert.match(claudeAgent, /description: "Review architecture changes proactively\."/);
