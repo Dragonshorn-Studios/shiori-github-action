@@ -130,6 +130,7 @@ A complete copy is available at [`examples/sync-affine.yml`](examples/sync-affin
 | `skills-directory` | no | `.agents/skills` | Canonical project-local Agent Skills directory |
 | `plugin-directory` | no | `plugins` | Installable generated plugin packages |
 | `marketplace-name` | no | `shiori-knowledge` | Marketplace name used by Claude Code, ZCode, and Cursor |
+| `plugin-version` | no | `1.1.0` | Semantic version written consistently to generated plugin and marketplace manifests |
 | `repository` | no | `GITHUB_REPOSITORY` | GitHub `owner/repository` used by Devin plugin metadata |
 
 Configure exactly one authentication method: `affine-token`, `affine-cookie`, or the `affine-email` + `affine-password` pair. Email/password is the recommended unattended option for current self-hosted AFFiNE because the legacy personal-access-token API was removed in AFFiNE 0.27+.

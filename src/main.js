@@ -43,10 +43,12 @@ async function main() {
     skillsDirectory: input('skills-directory', '.agents/skills'),
     pluginDirectory: input('plugin-directory', 'plugins'),
     marketplaceName: input('marketplace-name', 'shiori-knowledge'),
+    pluginVersion: input('plugin-version', '1.1.0').trim(),
     repository: input('repository').trim() || (process.env.GITHUB_REPOSITORY ?? '').trim()
   };
   if (!Number.isSafeInteger(config.maxDocuments) || config.maxDocuments < 1) throw new Error("Input 'max-documents' must be a positive integer.");
   if (!Number.isSafeInteger(config.skillIconMaxBytes) || config.skillIconMaxBytes < 1) throw new Error("Input 'skill-icon-max-bytes' must be a positive integer.");
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(config.pluginVersion)) throw new Error("Input 'plugin-version' must be a semantic version such as '1.1.0'.");
   new URL(config.baseUrl);
   validateAuthConfig(config);
   console.log('::group::Shiori — compiling AFFiNE knowledge');
