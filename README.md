@@ -188,6 +188,8 @@ Shiori also generates `AGENT-SETUP.md` and read-only `scripts/shiori-doctor.sh` 
 
 The generated guide includes `curl | sh` and PowerShell `irm | iex` entry points, so the doctor can run without cloning the generated knowledge repository. Remote mode performs detection only and recommends repository-backed marketplace installation; it never assumes project adapters exist in the current directory.
 
+Explicit install mode can maintain one Shiori checkout and expose its skills through the global `.agents/skills` standard used by OpenCode, MCode, and Vibe. It records successful host selections so a later update needs no host list. Checkout updates require the expected origin, a clean tree, and a fast-forward; skill synchronization manages only links previously created by Shiori.
+
 [ZCode](https://zcode.z.ai/en/docs/plugin) is a separate coding-agent product, not another name for Windsurf. Shiori serves ZCode through the generated plugin marketplace: ZCode prefers `.zcode-plugin/plugin.json` but explicitly accepts the generated Claude-compatible `.claude-plugin/plugin.json` fallback.
 
 It also creates one installable aggregate plugin under `plugins/shiori/` and maintains:
