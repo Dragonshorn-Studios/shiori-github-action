@@ -267,27 +267,64 @@ row() {
   command_name=$2
   home_path=$3
   mode=$4
+  provider=$5
   if has_command \"$command_name\"; then
-    printf '%-18s detected (CLI: %s)\\n' \"$tool\" \"$(command -v \"$command_name\")\"
+    printf '%-18s detected (CLI: %s) | Shiori: %s\\n' \"$tool\" \"$(command -v \"$command_name\")\" \"$(shiori_status \"$provider\")\"
   elif [ -n \"$home_path\" ] && has_home \"$home_path\"; then
-    printf '%-18s detected (configuration: ~/%s)\\n' \"$tool\" \"$home_path\"
+    printf '%-18s detected (configuration: ~/%s) | Shiori: %s\\n' \"$tool\" \"$home_path\" \"$(shiori_status \"$provider\")\"
   elif [ \"$mode\" = cloud ]; then
-    printf '%-18s cloud-capable (local CLI not required)\\n' \"$tool\"
+    printf '%-18s cloud-capable (local CLI not required) | Shiori: %s\\n' \"$tool\" \"$(shiori_status \"$provider\")\"
   else
     printf '%-18s not detected locally\\n' \"$tool\"
   fi
 }
 
+shared_skills_installed() {
+  [ -d \"$checkout/.git\" ] && [ -s \"$managed_skills_file\" ] || return 1
+  found_skill=false
+  while IFS= read -r skill_name; do
+    [ -n \"$skill_name\" ] || continue
+    found_skill=true
+    target_skill=\"$skills_root/$skill_name\"
+    source_skill=\"$checkout/skills/$skill_name\"
+    [ -L \"$target_skill\" ] && [ \"$(readlink \"$target_skill\")\" = \"$source_skill\" ] || return 1
+  done < \"$managed_skills_file\"
+  [ \"$found_skill\" = true ]
+}
+
+shiori_status() {
+  case $1 in
+    opencode|mcode|vibe)
+      if shared_skills_installed; then printf '%s' 'installed (managed Agent Skills)'; else printf '%s' 'not installed'; fi
+      ;;
+    codex)
+      if has_command codex && codex_plugins=$(codex plugin list --json 2>/dev/null); then
+        if contains_text \"$codex_plugins\" \"shiori@$marketplace\"; then printf '%s' 'installed (native plugin)'; else printf '%s' 'not installed'; fi
+      else
+        printf '%s' 'unknown (plugin status unavailable)'
+      fi
+      ;;
+    claude)
+      if has_command claude && claude_plugins=$(claude plugin list --json 2>/dev/null); then
+        if contains_text \"$claude_plugins\" \"shiori@$marketplace\"; then printf '%s' 'installed (native plugin)'; else printf '%s' 'not installed'; fi
+      else
+        printf '%s' 'unknown (plugin status unavailable)'
+      fi
+      ;;
+    *) printf '%s' 'unknown (no local status API)' ;;
+  esac
+}
+
 printf 'Shiori agent doctor\\nRepository: %s\\nMode: %s (%s)\\n\\n' \"$repository\" \"$context\" \"$project_hint\"
-row 'OpenCode' opencode '.config/opencode' local
-row 'Codex' codex '.codex' local
-row 'Claude Code' claude '.claude' local
-row 'ZCode' zcode '.zcode' local
-row 'Cursor' cursor '.cursor' local
-row 'MCode / MiniMax' mcode '.minimax' local
-row 'Windsurf' windsurf '.windsurf' local
-row 'Vibe' vibe '.vibe' local
-row 'Devin' devin '.devin' cloud
+row 'OpenCode' opencode '.config/opencode' local opencode
+row 'Codex' codex '.codex' local codex
+row 'Claude Code' claude '.claude' local claude
+row 'ZCode' zcode '.zcode' local zcode
+row 'Cursor' cursor '.cursor' local cursor
+row 'MCode / MiniMax' mcode '.minimax' local mcode
+row 'Windsurf' windsurf '.windsurf' local windsurf
+row 'Vibe' vibe '.vibe' local vibe
+row 'Devin' devin '.devin' cloud devin
 
 printf '%s\\n' \\
   '' \\
@@ -353,15 +390,15 @@ $Mode = if ($LocalCheckout) { 'checkout' } else { 'remote' }
 $ProjectHint = if ($LocalCheckout) { 'project adapters are ready in this checkout' } else { 'no Shiori checkout detected; use a marketplace installation below' }
 
 function Show-AgentStatus {
-    param([string]$Name, [string]$Command, [string]$HomePath, [switch]$Cloud)
+    param([string]$Name, [string]$Command, [string]$HomePath, [string]$Provider, [switch]$Cloud)
     $Executable = Get-Command $Command -ErrorAction SilentlyContinue
     $ConfigPath = if ($HomePath) { Join-Path $env:USERPROFILE $HomePath } else { $null }
     if ($Executable) {
-        Write-Host ($Name.PadRight(18) + ' detected (CLI: ' + $Executable.Source + ')')
+        Write-Host ($Name.PadRight(18) + ' detected (CLI: ' + $Executable.Source + ') | Shiori: ' + (Get-ShioriInstallStatus $Provider))
     } elseif ($ConfigPath -and (Test-Path -LiteralPath $ConfigPath)) {
-        Write-Host ($Name.PadRight(18) + ' detected (configuration: ' + $ConfigPath + ')')
+        Write-Host ($Name.PadRight(18) + ' detected (configuration: ' + $ConfigPath + ') | Shiori: ' + (Get-ShioriInstallStatus $Provider))
     } elseif ($Cloud) {
-        Write-Host ($Name.PadRight(18) + ' cloud-capable (local CLI not required)')
+        Write-Host ($Name.PadRight(18) + ' cloud-capable (local CLI not required) | Shiori: ' + (Get-ShioriInstallStatus $Provider))
     } else {
         Write-Host ($Name.PadRight(18) + ' not detected locally')
     }
@@ -401,6 +438,49 @@ function Test-ShioriSkillLink {
     if (-not $Item -or $Item.LinkType -notin @('Junction', 'SymbolicLink')) { return $false }
     $ActualTarget = [IO.Path]::GetFullPath([string]@($Item.Target)[0])
     return $ActualTarget -eq [IO.Path]::GetFullPath($ExpectedTarget)
+}
+
+function Test-SharedSkillsInstalled {
+    if (-not (Test-Path -LiteralPath (Join-Path $ManagedCheckout '.git')) -or -not (Test-Path -LiteralPath $ManagedSkillsFile)) { return $false }
+    $SkillNames = @(Get-Content -LiteralPath $ManagedSkillsFile | Where-Object { $_ })
+    if ($SkillNames.Count -eq 0) { return $false }
+    foreach ($SkillName in $SkillNames) {
+        $ExpectedTarget = Join-Path (Join-Path $ManagedCheckout 'skills') $SkillName
+        $Item = Get-Item -LiteralPath (Join-Path $SkillsRoot $SkillName) -Force -ErrorAction SilentlyContinue
+        if (-not (Test-ShioriSkillLink $Item $ExpectedTarget)) { return $false }
+    }
+    return $true
+}
+
+function Get-ShioriInstallStatus {
+    param([string]$Provider)
+    switch ($Provider) {
+        { $_ -in @('opencode', 'mcode', 'vibe') } {
+            if (Test-SharedSkillsInstalled) { return 'installed (managed Agent Skills)' }
+            return 'not installed'
+        }
+        'codex' {
+            if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { return 'unknown (plugin status unavailable)' }
+            try {
+                $RawPlugins = & codex plugin list --json 2>$null | Out-String
+                if ($LASTEXITCODE -ne 0) { return 'unknown (plugin status unavailable)' }
+                $Plugins = $RawPlugins | ConvertFrom-Json
+                if ($Plugins.installed.id -contains \"shiori@$Marketplace\") { return 'installed (native plugin)' }
+                return 'not installed'
+            } catch { return 'unknown (plugin status unavailable)' }
+        }
+        'claude' {
+            if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { return 'unknown (plugin status unavailable)' }
+            try {
+                $RawPlugins = & claude plugin list --json 2>$null | Out-String
+                if ($LASTEXITCODE -ne 0) { return 'unknown (plugin status unavailable)' }
+                $Plugins = $RawPlugins | ConvertFrom-Json
+                if ($Plugins.id -contains \"shiori@$Marketplace\") { return 'installed (native plugin)' }
+                return 'not installed'
+            } catch { return 'unknown (plugin status unavailable)' }
+        }
+        default { return 'unknown (no local status API)' }
+    }
 }
 
 function Sync-SharedSkills {
@@ -534,15 +614,15 @@ Write-Host 'Shiori agent doctor'
 Write-Host "Repository: $Repository"
 Write-Host "Mode: $Mode ($ProjectHint)"
 Write-Host ''
-Show-AgentStatus 'OpenCode' opencode '.config\\opencode'
-Show-AgentStatus 'Codex' codex '.codex'
-Show-AgentStatus 'Claude Code' claude '.claude'
-Show-AgentStatus 'ZCode' zcode '.zcode'
-Show-AgentStatus 'Cursor' cursor '.cursor'
-Show-AgentStatus 'MCode / MiniMax' mcode '.minimax'
-Show-AgentStatus 'Windsurf' windsurf '.windsurf'
-Show-AgentStatus 'Vibe' vibe '.vibe'
-Show-AgentStatus 'Devin' devin '.devin' -Cloud
+Show-AgentStatus 'OpenCode' opencode '.config\\opencode' opencode
+Show-AgentStatus 'Codex' codex '.codex' codex
+Show-AgentStatus 'Claude Code' claude '.claude' claude
+Show-AgentStatus 'ZCode' zcode '.zcode' zcode
+Show-AgentStatus 'Cursor' cursor '.cursor' cursor
+Show-AgentStatus 'MCode / MiniMax' mcode '.minimax' mcode
+Show-AgentStatus 'Windsurf' windsurf '.windsurf' windsurf
+Show-AgentStatus 'Vibe' vibe '.vibe' vibe
+Show-AgentStatus 'Devin' devin '.devin' devin -Cloud
 
 Write-Host @"
 

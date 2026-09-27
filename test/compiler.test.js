@@ -186,10 +186,14 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(shellDoctor, /claude plugin install --scope user --yes/);
   assert.match(shellDoctor, /git clone --filter=blob:none/);
   assert.match(shellDoctor, /sync_shared_skills/);
+  assert.match(shellDoctor, /Shiori: %s/);
+  assert.match(shellDoctor, /shared_skills_installed/);
   const powerShellDoctor = await readFile(join(repositoryRoot, 'scripts/shiori-doctor.ps1'), 'utf8');
   assert.match(powerShellDoctor, /Get-Command/);
   assert.match(powerShellDoctor, /'remote'/);
   assert.match(powerShellDoctor, /Assert-PluginInstaller/);
   assert.match(powerShellDoctor, /Update-ManagedCheckout/);
   assert.match(powerShellDoctor, /New-Item -ItemType \$LinkType/);
+  assert.match(powerShellDoctor, /Get-ShioriInstallStatus/);
+  assert.match(powerShellDoctor, /Test-SharedSkillsInstalled/);
 });
