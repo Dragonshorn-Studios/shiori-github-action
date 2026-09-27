@@ -124,6 +124,11 @@ record_host() {
   fi
   printf '%s\\n' \"$1\" >> \"$installed_hosts_file\"
 }
+host_is_recorded() {
+  [ -f \"$installed_hosts_file\" ] || return 1
+  while IFS= read -r recorded_host; do [ \"$recorded_host\" = \"$1\" ] && return 0; done < \"$installed_hosts_file\"
+  return 1
+}
 ensure_checkout() {
   has_command git || { printf '%s\\n' 'Cannot install shared skills: git is not available.' >&2; return 1; }
   if [ -d \"$checkout/.git\" ]; then
@@ -298,18 +303,10 @@ shiori_status() {
       if shared_skills_installed; then printf '%s' 'installed (managed Agent Skills)'; else printf '%s' 'not installed'; fi
       ;;
     codex)
-      if has_command codex && codex_plugins=$(codex plugin list --json 2>/dev/null); then
-        if contains_text \"$codex_plugins\" \"shiori@$marketplace\"; then printf '%s' 'installed (native plugin)'; else printf '%s' 'not installed'; fi
-      else
-        printf '%s' 'unknown (plugin status unavailable)'
-      fi
+      if host_is_recorded codex; then printf '%s' 'installed (recorded native plugin)'; else printf '%s' 'unknown (not installed by this doctor)'; fi
       ;;
     claude)
-      if has_command claude && claude_plugins=$(claude plugin list --json 2>/dev/null); then
-        if contains_text \"$claude_plugins\" \"shiori@$marketplace\"; then printf '%s' 'installed (native plugin)'; else printf '%s' 'not installed'; fi
-      else
-        printf '%s' 'unknown (plugin status unavailable)'
-      fi
+      if host_is_recorded claude; then printf '%s' 'installed (recorded native plugin)'; else printf '%s' 'unknown (not installed by this doctor)'; fi
       ;;
     *) printf '%s' 'unknown (no local status API)' ;;
   esac
@@ -411,6 +408,12 @@ function Add-RecordedHost {
     if ($Recorded -notcontains $Target) { Add-Content -LiteralPath $InstalledHostsFile -Value $Target -Encoding utf8 }
 }
 
+function Test-RecordedHost {
+    param([string]$Target)
+    if (-not (Test-Path -LiteralPath $InstalledHostsFile)) { return $false }
+    return @(Get-Content -LiteralPath $InstalledHostsFile) -contains $Target
+}
+
 function Update-ManagedCheckout {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Cannot install shared skills: git is not available.' }
     $GitDirectory = Join-Path $ManagedCheckout '.git'
@@ -460,24 +463,12 @@ function Get-ShioriInstallStatus {
             return 'not installed'
         }
         'codex' {
-            if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { return 'unknown (plugin status unavailable)' }
-            try {
-                $RawPlugins = & codex plugin list --json 2>$null | Out-String
-                if ($LASTEXITCODE -ne 0) { return 'unknown (plugin status unavailable)' }
-                $Plugins = $RawPlugins | ConvertFrom-Json
-                if ($Plugins.installed.id -contains \"shiori@$Marketplace\") { return 'installed (native plugin)' }
-                return 'not installed'
-            } catch { return 'unknown (plugin status unavailable)' }
+            if (Test-RecordedHost codex) { return 'installed (recorded native plugin)' }
+            return 'unknown (not installed by this doctor)'
         }
         'claude' {
-            if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { return 'unknown (plugin status unavailable)' }
-            try {
-                $RawPlugins = & claude plugin list --json 2>$null | Out-String
-                if ($LASTEXITCODE -ne 0) { return 'unknown (plugin status unavailable)' }
-                $Plugins = $RawPlugins | ConvertFrom-Json
-                if ($Plugins.id -contains \"shiori@$Marketplace\") { return 'installed (native plugin)' }
-                return 'not installed'
-            } catch { return 'unknown (plugin status unavailable)' }
+            if (Test-RecordedHost claude) { return 'installed (recorded native plugin)' }
+            return 'unknown (not installed by this doctor)'
         }
         default { return 'unknown (no local status API)' }
     }

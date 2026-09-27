@@ -188,6 +188,7 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(shellDoctor, /sync_shared_skills/);
   assert.match(shellDoctor, /Shiori: %s/);
   assert.match(shellDoctor, /shared_skills_installed/);
+  assert.match(shellDoctor, /host_is_recorded codex/);
   const powerShellDoctor = await readFile(join(repositoryRoot, 'scripts/shiori-doctor.ps1'), 'utf8');
   assert.match(powerShellDoctor, /Get-Command/);
   assert.match(powerShellDoctor, /'remote'/);
@@ -196,4 +197,5 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(powerShellDoctor, /New-Item -ItemType \$LinkType/);
   assert.match(powerShellDoctor, /Get-ShioriInstallStatus/);
   assert.match(powerShellDoctor, /Test-SharedSkillsInstalled/);
+  assert.match(powerShellDoctor, /Test-RecordedHost codex/);
 });
