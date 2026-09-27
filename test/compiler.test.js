@@ -175,7 +175,11 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   await readFile(join(repositoryRoot, '.windsurf/skills/architecture-apis/SKILL.md'), 'utf8');
   await readFile(join(repositoryRoot, '.vibe/skills/architecture-apis/SKILL.md'), 'utf8');
   await readFile(join(repositoryRoot, '.devin/skills/architecture-apis/SKILL.md'), 'utf8');
-  assert.match(await readFile(join(repositoryRoot, 'AGENT-SETUP.md'), 'utf8'), /OpenCode/);
-  assert.match(await readFile(join(repositoryRoot, 'scripts/shiori-doctor.sh'), 'utf8'), /cloud-capable/);
-  assert.match(await readFile(join(repositoryRoot, 'scripts/shiori-doctor.ps1'), 'utf8'), /Get-Command/);
+  const setupGuide = await readFile(join(repositoryRoot, 'AGENT-SETUP.md'), 'utf8');
+  assert.match(setupGuide, /curl -fsSL/);
+  assert.match(setupGuide, /irm .* \| iex/);
+  assert.match(await readFile(join(repositoryRoot, 'scripts/shiori-doctor.sh'), 'utf8'), /context='remote'/);
+  const powerShellDoctor = await readFile(join(repositoryRoot, 'scripts/shiori-doctor.ps1'), 'utf8');
+  assert.match(powerShellDoctor, /Get-Command/);
+  assert.match(powerShellDoctor, /'remote'/);
 });
