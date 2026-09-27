@@ -137,6 +137,8 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   const cursorPlugin = JSON.parse(await readFile(join(repositoryRoot, 'plugins/shiori/.cursor-plugin/plugin.json'), 'utf8'));
   const zcodePlugin = JSON.parse(await readFile(join(repositoryRoot, 'plugins/shiori/.zcode-plugin/plugin.json'), 'utf8'));
   const codexPlugin = JSON.parse(await readFile(join(repositoryRoot, 'plugins/shiori/.codex-plugin/plugin.json'), 'utf8'));
+  const portablePlugin = JSON.parse(await readFile(join(repositoryRoot, 'plugins/shiori/plugin.json'), 'utf8'));
+  const codexMarketplace = JSON.parse(await readFile(join(repositoryRoot, '.agents/plugins/marketplace.json'), 'utf8'));
   const devinPlugin = JSON.parse(await readFile(join(repositoryRoot, '.devin-plugin/plugin.json'), 'utf8'));
   const claudeAgent = await readFile(join(repositoryRoot, '.claude/agents/architecture-apis.md'), 'utf8');
   const pluginAgent = await readFile(join(repositoryRoot, 'plugins/shiori/agents/architecture-apis.md'), 'utf8');
@@ -153,6 +155,10 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.equal(zcodePlugin.skills, 'skills');
   assert.equal(zcodePlugin.agents, 'agents');
   assert.equal(codexPlugin.skills, './skills/');
+  assert.equal(portablePlugin.$schema, 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json');
+  assert.equal(codexMarketplace.plugins[0].source.path, './plugins/shiori');
+  assert.equal(codexMarketplace.plugins[0].policy.installation, 'AVAILABLE');
+  assert.equal(codexMarketplace.plugins[0].category, 'Productivity');
   assert.equal(zcodeMarketplace.plugins[0].icon, 'https://raw.githubusercontent.com/example/project/HEAD/plugins/shiori/assets/icon.png');
   assert.equal(zcodeMarketplace.plugins[0].version, '1.1.0');
   assert.equal(codexPlugin.version, '1.1.0');
@@ -169,4 +175,7 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   await readFile(join(repositoryRoot, '.windsurf/skills/architecture-apis/SKILL.md'), 'utf8');
   await readFile(join(repositoryRoot, '.vibe/skills/architecture-apis/SKILL.md'), 'utf8');
   await readFile(join(repositoryRoot, '.devin/skills/architecture-apis/SKILL.md'), 'utf8');
+  assert.match(await readFile(join(repositoryRoot, 'AGENT-SETUP.md'), 'utf8'), /OpenCode/);
+  assert.match(await readFile(join(repositoryRoot, 'scripts/shiori-doctor.sh'), 'utf8'), /cloud-capable/);
+  assert.match(await readFile(join(repositoryRoot, 'scripts/shiori-doctor.ps1'), 'utf8'), /Get-Command/);
 });

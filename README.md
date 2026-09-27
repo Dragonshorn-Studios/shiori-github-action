@@ -184,11 +184,14 @@ Following the cross-agent layout used by [`Rughalt/coding-agent-plugins`](https:
 | Vibe | `.vibe/skills/<name>/` |
 | Devin project sessions | `.devin/skills/<name>/` |
 
+Shiori also generates `AGENT-SETUP.md` and read-only `scripts/shiori-doctor.sh` / `scripts/shiori-doctor.ps1` helpers. They detect local CLIs and configuration directories, distinguish cloud-capable hosts such as Devin, and print the native setup action for every supported host. The same generation pass emits a portable Agent Plugins `plugins/shiori/plugin.json` and a Codex-native `.agents/plugins/marketplace.json`; `.codex-plugin/plugin.json` remains as a compatibility fallback.
+
 [ZCode](https://zcode.z.ai/en/docs/plugin) is a separate coding-agent product, not another name for Windsurf. Shiori serves ZCode through the generated plugin marketplace: ZCode prefers `.zcode-plugin/plugin.json` but explicitly accepts the generated Claude-compatible `.claude-plugin/plugin.json` fallback.
 
-It also creates an installable plugin for every tagged document under `plugins/shiori-<name>/` and maintains:
+It also creates one installable aggregate plugin under `plugins/shiori/` and maintains:
 
 - `.claude-plugin/marketplace.json` for Claude Code;
+- `.agents/plugins/marketplace.json` for Codex and ChatGPT desktop;
 - `.cursor-plugin/marketplace.json` for Cursor;
 - `marketplace.json` plus `.zcode-plugin/plugin.json` manifests for ZCode;
 - `.devin-plugin/plugin.json` as a Devin meta-plugin that requires all generated skill plugins.
