@@ -178,8 +178,13 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   const setupGuide = await readFile(join(repositoryRoot, 'AGENT-SETUP.md'), 'utf8');
   assert.match(setupGuide, /curl -fsSL/);
   assert.match(setupGuide, /irm .* \| iex/);
-  assert.match(await readFile(join(repositoryRoot, 'scripts/shiori-doctor.sh'), 'utf8'), /context='remote'/);
+  assert.match(setupGuide, /--install codex claude/);
+  const shellDoctor = await readFile(join(repositoryRoot, 'scripts/shiori-doctor.sh'), 'utf8');
+  assert.match(shellDoctor, /context='remote'/);
+  assert.match(shellDoctor, /codex plugin add/);
+  assert.match(shellDoctor, /claude plugin install --scope user --yes/);
   const powerShellDoctor = await readFile(join(repositoryRoot, 'scripts/shiori-doctor.ps1'), 'utf8');
   assert.match(powerShellDoctor, /Get-Command/);
   assert.match(powerShellDoctor, /'remote'/);
+  assert.match(powerShellDoctor, /Assert-PluginInstaller/);
 });
