@@ -90,13 +90,24 @@ test('rejects an output directory outside the repository', async () => {
 
 test('generates a dependency-free Pages shell and recursive navigation', async () => {
   const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-pages-'));
-  await compile(new FixtureSource(), { ...baseConfig, repositoryRoot, pages: true });
+  await compile(new TaggedFixtureSource(), {
+    ...baseConfig,
+    repositoryRoot,
+    pages: true,
+    skillTag: 'skill',
+    agentTag: 'agent',
+    skillsDirectory: '.agents/skills',
+    pluginDirectory: 'plugins'
+  });
   const layout = await readFile(join(repositoryRoot, 'docs/_layouts/default.html'), 'utf8');
   const nav = await readFile(join(repositoryRoot, 'docs/_data/shiori-nav.yml'), 'utf8');
   const css = await readFile(join(repositoryRoot, 'docs/assets/css/shiori.css'), 'utf8');
   assert.match(layout, /include nav\.html/);
   assert.match(nav, /children:/);
   assert.match(nav, /Architecture & APIs/);
+  assert.match(nav, /- title: "Agents"/);
+  assert.match(nav, /- title: "Skills"/);
+  assert.match(nav, /url: \/brain\/architecture-apis\.html/);
   assert.match(css, /--gold:/);
   assert.match(css, /--accent: #c288f7/);
   assert.match(css, /var\(--glow\)/);
