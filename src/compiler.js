@@ -40,7 +40,7 @@ export async function compile(source, config) {
   for (const document of documents.values()) {
     const target = pathById.get(document.id);
     const body = rewriteDocumentLinks(document.markdown, config, target, pathById);
-    const content = frontmatter(document) + normalizeMarkdown(body);
+    const content = frontmatter(document, agentTaggedIds) + normalizeMarkdown(body);
     await write(outputRoot, target, content);
     written.push({ document, path: target, content });
   }
@@ -146,9 +146,19 @@ function renderIndex(documents, paths, rootId) {
 
 function renderNavigation(documents, paths, rootId, agentTaggedIds = new Set(), skillTaggedIds = new Set()) {
   const lines = [];
+  const groupedIds = new Set([...agentTaggedIds, ...skillTaggedIds]);
+  const childIds = id => documents.get(id).childIds.filter(childId => documents.has(childId) && documents.get(childId).parentId === id);
+  const treeChildren = id => {
+    const visible = [];
+    for (const childId of childIds(id)) {
+      if (groupedIds.has(childId)) visible.push(...treeChildren(childId));
+      else visible.push(childId);
+    }
+    return visible;
+  };
   const visit = (id, depth) => {
     const indent = '  '.repeat(depth);
-    const children = documents.get(id).childIds.filter(childId => documents.has(childId) && documents.get(childId).parentId === id);
+    const children = treeChildren(id);
     lines.push(`${indent}- title: ${JSON.stringify(documents.get(id).title)}`, `${indent}  url: /brain/${paths.get(id).replace(/\.md$/, '.html')}`);
     if (children.length) {
       lines.push(`${indent}  children:`);
@@ -171,7 +181,7 @@ function renderNavigation(documents, paths, rootId, agentTaggedIds = new Set(), 
     lines.push('- title: "Agents"');
     lines.push('  children:');
     for (const agentDoc of agents) {
-      lines.push(`    - title: ${JSON.stringify(agentDoc.title)}`);
+      lines.push(`    - title: ${JSON.stringify(displayTitle(agentDoc))}`);
       lines.push(`      url: /brain/${paths.get(agentDoc.id).replace(/\.md$/, '.html')}`);
     }
   }
@@ -188,8 +198,19 @@ function renderNavigation(documents, paths, rootId, agentTaggedIds = new Set(), 
   return lines.join('\n') + '\n';
 }
 
-function frontmatter(document) {
-  return `---\nlayout: default\ntitle: ${JSON.stringify(document.title)}\nshiori_source_id: ${JSON.stringify(document.id)}\n---\n\n`;
+function firstAtxH1(markdown) {
+  const match = String(markdown ?? '').match(/^#(?!#)[ \t]+(.+?)\s*$/m);
+  if (!match) return null;
+  return match[1].replace(/[ \t]+#+\s*$/, '').trim() || null;
+}
+
+function displayTitle(document) {
+  return firstAtxH1(document.markdown) || document.title;
+}
+
+function frontmatter(document, agentTaggedIds = new Set()) {
+  const title = agentTaggedIds.has(document.id) ? displayTitle(document) : document.title;
+  return `---\nlayout: default\ntitle: ${JSON.stringify(title)}\nshiori_source_id: ${JSON.stringify(document.id)}\n---\n\n`;
 }
 
 async function updateAgentFile(config) {

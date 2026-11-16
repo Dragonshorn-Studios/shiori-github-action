@@ -30,6 +30,33 @@ class TaggedFixtureSource extends FixtureSource {
   }
 }
 
+class AgentNavFixtureSource extends FixtureSource {
+  async getDocument(id) {
+    if (id === 'comment-analyzer') {
+      return {
+        id: 'comment-analyzer',
+        title: 'comment-analyzer',
+        updatedAt: '2026-01-06T03:04:05.000Z',
+        revision: 'r5',
+        markdown: '# Comment Analyzer\n\nReview comments with the project voice.\n'
+      };
+    }
+    const document = await super.getDocument(id);
+    if (id === 'root') {
+      document.markdown += '\nSee also [Comment Analyzer](https://affine.example/workspace/ws-123/comment-analyzer).';
+    }
+    return document;
+  }
+
+  async listTaggedDocumentIds(tag) {
+    return tag === 'agent' ? ['comment-analyzer'] : ['architecture'];
+  }
+}
+
+function navUrls(nav) {
+  return [...nav.matchAll(/^\s*url: (\S+)/gm)].map(match => match[1]);
+}
+
 const baseConfig = {
   baseUrl: 'https://affine.example',
   workspaceId: 'ws-123',
@@ -108,9 +135,42 @@ test('generates a dependency-free Pages shell and recursive navigation', async (
   assert.match(nav, /- title: "Agents"/);
   assert.match(nav, /- title: "Skills"/);
   assert.match(nav, /url: \/brain\/architecture-apis\.html/);
+  const tree = nav.split('- title: "Agents"')[0];
+  assert.doesNotMatch(tree, /architecture-apis\.html/);
+  assert.match(tree, /url: \/brain\/architecture-apis\/use-git-for-history\.html/);
   assert.match(css, /--gold:/);
   assert.match(css, /--accent: #c288f7/);
   assert.match(css, /var\(--glow\)/);
+});
+
+test('pages nav lists each URL once, uses agent H1 titles, and keeps untagged children', async () => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-nav-titles-'));
+  await compile(new AgentNavFixtureSource(), {
+    ...baseConfig,
+    repositoryRoot,
+    pages: true,
+    skillTag: 'skill',
+    agentTag: 'agent',
+    skillsDirectory: '.agents/skills',
+    pluginDirectory: 'plugins'
+  });
+  const nav = await readFile(join(repositoryRoot, 'docs/_data/shiori-nav.yml'), 'utf8');
+  const page = await readFile(join(repositoryRoot, 'docs/brain/comment-analyzer.md'), 'utf8');
+  const skill = await readFile(join(repositoryRoot, '.agents/skills/comment-analyzer/SKILL.md'), 'utf8');
+  const urls = navUrls(nav);
+  assert.equal(urls.length, new Set(urls).size);
+  assert.match(nav, /- title: "Agents"/);
+  assert.match(nav, /- title: "Comment Analyzer"/);
+  assert.match(nav, /url: \/brain\/comment-analyzer\.html/);
+  assert.match(nav, /- title: "Skills"/);
+  assert.match(nav, /Architecture & APIs/);
+  const tree = nav.split('- title: "Agents"')[0];
+  assert.doesNotMatch(tree, /comment-analyzer/);
+  assert.doesNotMatch(tree, /Architecture & APIs/);
+  assert.match(tree, /Use Git for history/);
+  assert.match(tree, /url: \/brain\/architecture-apis\/use-git-for-history\.html/);
+  assert.match(page, /title: "Comment Analyzer"/);
+  assert.match(skill, /name: comment-analyzer/);
 });
 
 test('turns only exported tagged documents into cross-agent skills, native agents, and marketplaces', async () => {
