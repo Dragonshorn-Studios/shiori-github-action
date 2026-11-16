@@ -53,7 +53,7 @@ export async function compile(source, config) {
 
   if (config.agentFile) await updateAgentFile(config);
   if (config.pages) {
-    await write(dirname(outputRoot), '_data/shiori-nav.yml', renderNavigation(documents, pathById, config.rootDocumentId));
+    await write(dirname(outputRoot), '_data/shiori-nav.yml', renderNavigation(documents, pathById, config.rootDocumentId, agentTaggedIds, skillTaggedIds));
     await writePagesShell(config, outputRoot);
   }
   let skillCount = 0;
@@ -144,7 +144,7 @@ function renderIndex(documents, paths, rootId) {
   return lines.join('\n') + '\n';
 }
 
-function renderNavigation(documents, paths, rootId) {
+function renderNavigation(documents, paths, rootId, agentTaggedIds = new Set(), skillTaggedIds = new Set()) {
   const lines = [];
   const visit = (id, depth) => {
     const indent = '  '.repeat(depth);
@@ -156,6 +156,35 @@ function renderNavigation(documents, paths, rootId) {
     }
   };
   visit(rootId, 0);
+
+  const agents = [...agentTaggedIds]
+    .filter(id => documents.has(id))
+    .map(id => documents.get(id))
+    .sort((a, b) => a.title.localeCompare(b.title));
+
+  const skills = [...skillTaggedIds]
+    .filter(id => documents.has(id))
+    .map(id => documents.get(id))
+    .sort((a, b) => a.title.localeCompare(b.title));
+
+  if (agents.length) {
+    lines.push('- title: "Agents"');
+    lines.push('  children:');
+    for (const agentDoc of agents) {
+      lines.push(`    - title: ${JSON.stringify(agentDoc.title)}`);
+      lines.push(`      url: /brain/${paths.get(agentDoc.id).replace(/\.md$/, '.html')}`);
+    }
+  }
+
+  if (skills.length) {
+    lines.push('- title: "Skills"');
+    lines.push('  children:');
+    for (const skillDoc of skills) {
+      lines.push(`    - title: ${JSON.stringify(skillDoc.title)}`);
+      lines.push(`      url: /brain/${paths.get(skillDoc.id).replace(/\.md$/, '.html')}`);
+    }
+  }
+
   return lines.join('\n') + '\n';
 }
 
