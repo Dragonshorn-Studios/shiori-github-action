@@ -35,6 +35,24 @@ export const MCP_HOSTS = {
     configPath: '.cursor/mcp.json',
     instructionPath: null
   },
+  devin: {
+    id: 'devin',
+    label: 'Devin',
+    kind: 'json',
+    detectPath: '.config/devin',
+    configPath: '.config/devin/mcp_config.json',
+    instructionPath: null
+  },
+  opencode: {
+    id: 'opencode',
+    label: 'OpenCode',
+    kind: 'json',
+    jsonShape: 'opencode',
+    detectPath: '.config/opencode',
+    configPath: '.config/opencode/opencode.jsonc',
+    configCandidates: ['.config/opencode/opencode.json', '.config/opencode/opencode.jsonc'],
+    instructionPath: null
+  },
   claude: {
     id: 'claude',
     label: 'Claude Code',
@@ -141,7 +159,7 @@ export function renderMcpMarkdownTable() {
   for (const server of mcpServerCatalog()) {
     const when = server.whenInstalled
       ? `Only when \`${server.command}\` is on \`PATH\``
-      : 'On `--install` / `--update` for Cursor, Claude Code, and Codex';
+      : 'On `--install` / `--update` for Cursor, Devin, OpenCode, Claude Code, and Codex';
     rows.push(`| \`${server.name}\` | \`${server.invocation}\` | ${server.summary} | ${when} |`);
   }
   return `${rows.join('\n')}\n`;
@@ -291,7 +309,19 @@ export function writeJsonAtomic(path, content) {
   if (fileModeBits != null) chmodSync(path, fileModeBits);
 }
 
-function parseJsonConfig(text) {
+function parseJsonConfig(text, shape = 'mcpServers') {
+  if (shape === 'opencode') {
+    if (text == null || !String(text).trim()) return { mcp: { servers: {} } };
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('MCP config must be a JSON object.');
+    if (parsed.mcp == null) parsed.mcp = {};
+    if (typeof parsed.mcp !== 'object' || Array.isArray(parsed.mcp)) throw new Error('mcp must be an object.');
+    if (parsed.mcp.servers == null) parsed.mcp.servers = {};
+    if (typeof parsed.mcp.servers !== 'object' || Array.isArray(parsed.mcp.servers)) {
+      throw new Error('mcp.servers must be an object.');
+    }
+    return parsed;
+  }
   if (text == null || !String(text).trim()) return { mcpServers: {} };
   const parsed = JSON.parse(text);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('MCP config must be a JSON object.');
@@ -302,22 +332,61 @@ function parseJsonConfig(text) {
   return parsed;
 }
 
+function jsonServerMap(config, shape) {
+  return shape === 'opencode' ? config.mcp.servers : config.mcpServers;
+}
+
+function normalizeJsonEntry(entry, shape) {
+  if (shape !== 'opencode' || !entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+  if (entry.url || entry.serverUrl || String(entry.type || '').toLowerCase() === 'remote') {
+    return { url: entry.url ?? entry.serverUrl, headers: entry.headers };
+  }
+  const command = Array.isArray(entry.command)
+    ? entry.command.map(String)
+    : [String(entry.command ?? '')];
+  const normalized = { command: command[0] ?? '', args: command.slice(1) };
+  const env = entry.environment ?? entry.env;
+  if (env && typeof env === 'object') normalized.env = env;
+  return normalized;
+}
+
+function hostJsonEntry(server, shape, existing) {
+  const entry = existing && typeof existing === 'object' ? { ...existing } : {};
+  if (shape === 'opencode') {
+    entry.type = 'local';
+    entry.command = [server.command, ...server.args];
+    if (server.env) {
+      const current = existing?.environment;
+      entry.environment = { ...(current && typeof current === 'object' ? current : {}), ...server.env };
+    }
+    return entry;
+  }
+  entry.command = server.command;
+  entry.args = [...server.args];
+  if (server.env) {
+    const current = existing?.env;
+    entry.env = { ...(current && typeof current === 'object' ? current : {}), ...server.env };
+  }
+  return entry;
+}
+
 function stringifyJsonConfig(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-export function applyJsonMcpConfig(text, servers) {
-  const config = parseJsonConfig(text);
+export function applyJsonMcpConfig(text, servers, shape = 'mcpServers') {
+  const config = parseJsonConfig(text, shape);
+  const bucket = jsonServerMap(config, shape);
   const reports = [];
   let changed = false;
   for (const server of servers) {
-    const has = Object.prototype.hasOwnProperty.call(config.mcpServers, server.name);
-    const existing = has ? config.mcpServers[server.name] : null;
+    const has = Object.prototype.hasOwnProperty.call(bucket, server.name);
+    const existing = has ? bucket[server.name] : null;
     const classification = !has
       ? 'missing'
       : (existing == null || typeof existing !== 'object' || Array.isArray(existing))
         ? 'conflict'
-        : classifyEntry(existing, server);
+        : classifyEntry(normalizeJsonEntry(existing, shape), server);
     if (classification === 'match') {
       reports.push({ name: server.name, status: 'unchanged' });
       continue;
@@ -327,27 +396,26 @@ export function applyJsonMcpConfig(text, servers) {
       continue;
     }
     if (classification === 'stale') {
-      const next = { ...existing, command: server.command, args: [...server.args] };
-      if (server.env) next.env = { ...(existing.env && typeof existing.env === 'object' ? existing.env : {}), ...server.env };
-      config.mcpServers[server.name] = next;
+      bucket[server.name] = hostJsonEntry(server, shape, existing);
       reports.push({ name: server.name, status: 'updated' });
       changed = true;
       continue;
     }
-    config.mcpServers[server.name] = desiredEntry(server);
+    bucket[server.name] = hostJsonEntry(server, shape);
     reports.push({ name: server.name, status: 'added' });
     changed = true;
   }
   return { text: stringifyJsonConfig(config), changed, reports, config };
 }
 
-function readJsonEntry(text, name) {
+function readJsonEntry(text, name, shape = 'mcpServers') {
   try {
-    const config = parseJsonConfig(text);
-    if (!Object.prototype.hasOwnProperty.call(config.mcpServers, name)) return null;
-    const existing = config.mcpServers[name];
+    const config = parseJsonConfig(text, shape);
+    const bucket = jsonServerMap(config, shape);
+    if (!Object.prototype.hasOwnProperty.call(bucket, name)) return null;
+    const existing = bucket[name];
     if (existing == null || typeof existing !== 'object' || Array.isArray(existing)) return { url: 'invalid-entry' };
-    return existing;
+    return normalizeJsonEntry(existing, shape);
   } catch {
     return undefined;
   }
@@ -559,22 +627,36 @@ function applyCliMcpConfig(host, servers, env, execFile, { write }) {
   return reports;
 }
 
+function resolveJsonConfigPath(home, host) {
+  const candidates = host.configCandidates ?? [host.configPath];
+  for (const candidate of candidates) {
+    try {
+      accessSync(join(home, candidate));
+      return join(home, candidate);
+    } catch {
+      // try the next candidate
+    }
+  }
+  return join(home, host.configPath);
+}
+
 export function planHostMcp(host, home, env, { write, checkout, execFile, archiveUrl }) {
   const catalog = mcpServerCatalog({ checkout, archiveUrl });
   const { selected, skipped } = selectServersForInstall(catalog, env);
   const reports = skipped.map(server => ({ name: server.name, status: 'skipped', message: `${server.command} is not on PATH` }));
-  const configPath = join(home, host.configPath);
+  const shape = host.jsonShape ?? 'mcpServers';
+  const configPath = host.kind === 'json' ? resolveJsonConfigPath(home, host) : join(home, host.configPath);
   if (host.kind !== 'json') {
     reports.push(...applyCliMcpConfig(host, selected, env, execFile, { write }));
     return { host, configPath, changed: false, reports };
   }
   const currentText = readText(configPath);
   if (write) {
-    const applied = applyJsonMcpConfig(currentText, selected);
+    const applied = applyJsonMcpConfig(currentText, selected, shape);
     return { host, configPath, currentText, nextText: applied.text, changed: applied.changed, reports: [...reports, ...applied.reports] };
   }
   for (const server of selected) {
-    const existing = readJsonEntry(currentText, server.name);
+    const existing = readJsonEntry(currentText, server.name, shape);
     if (existing === undefined) {
       reports.push({ name: server.name, status: 'error', message: `unable to parse ${host.configPath}` });
       continue;
@@ -623,19 +705,21 @@ export function detectedHosts(home) {
     if (seen.has(host.id)) continue;
     seen.add(host.id);
     const detect = join(home, host.detectPath);
-    const config = join(home, host.configPath);
     try {
       accessSync(detect);
       hosts.push(host);
       continue;
     } catch {
-      // fall through to config path
+      // fall through to config paths
     }
-    try {
-      accessSync(config);
-      hosts.push(host);
-    } catch {
-      // host is not present
+    for (const candidate of host.configCandidates ?? [host.configPath]) {
+      try {
+        accessSync(join(home, candidate));
+        hosts.push(host);
+        break;
+      } catch {
+        // host is not present at this path
+      }
     }
   }
   return hosts;
@@ -683,7 +767,7 @@ export function runMcpCli(argv, options = {}) {
   const hosts = hostNames.length
     ? hostNames.map(resolveHost)
     : detectedHosts(home);
-  if (write && !hostNames.length) throw new Error('Pass at least one --host: cursor, claude, or codex.');
+  if (write && !hostNames.length) throw new Error('Pass at least one --host: cursor, devin, opencode, claude, or codex.');
   if (!hosts.length) {
     lines.push('MCP no supported agent hosts detected');
     return { lines, reports: [] };

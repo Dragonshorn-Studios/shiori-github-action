@@ -310,7 +310,7 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   const setupGuide = await readFile(join(repositoryRoot, 'AGENT-SETUP.md'), 'utf8');
   assert.match(setupGuide, /curl -fsSL/);
   assert.match(setupGuide, /irm .* \| iex/);
-  assert.match(setupGuide, /--install opencode mcode vibe codex claude cursor/);
+  assert.match(setupGuide, /--install opencode mcode vibe codex claude cursor devin/);
   assert.match(setupGuide, /--update/);
   assert.match(setupGuide, /figcraft-cli mcp/);
   assert.match(setupGuide, /claude mcp add -s user/);
@@ -326,6 +326,10 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(shellDoctor, /shared_skills_installed/);
   assert.match(shellDoctor, /host_is_recorded codex/);
   assert.match(shellDoctor, /run_mcp_cli install --host cursor/);
+  assert.match(shellDoctor, /run_mcp_cli install --host devin/);
+  assert.match(shellDoctor, /run_mcp_cli install --host opencode/);
+  assert.match(shellDoctor, /mcp_configured/);
+  assert.match(shellDoctor, /host_detected/);
   assert.doesNotMatch(shellDoctor, /run_mcp_cli verify/);
   assert.match(shellDoctor, /--base-url/);
   assert.match(shellDoctor, /https:\/\/example\.github\.io\/project\//);
@@ -344,6 +348,10 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(powerShellDoctor, /Test-SharedSkillsInstalled/);
   assert.match(powerShellDoctor, /Test-RecordedHost codex/);
   assert.match(powerShellDoctor, /Invoke-McpCli -McpArgs @\('install', '--host', 'cursor'\)/);
+  assert.match(powerShellDoctor, /Invoke-McpCli -McpArgs @\('install', '--host', 'devin'\)/);
+  assert.match(powerShellDoctor, /Invoke-McpCli -McpArgs @\('install', '--host', 'opencode'\)/);
+  assert.match(powerShellDoctor, /Test-McpConfigured/);
+  assert.match(powerShellDoctor, /Test-HostDetected/);
   assert.doesNotMatch(powerShellDoctor, /Invoke-McpCli -McpArgs @\('verify'\)/);
   assert.match(powerShellDoctor, /--base-url \$ArchiveUrl/);
   assert.match(powerShellDoctor, /A read-only run does not launch host CLIs/);
