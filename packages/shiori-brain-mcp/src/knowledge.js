@@ -1,11 +1,20 @@
 export const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
 const MISSING_ARCHIVE = 'Pass --base-url or set SHIORI_BRAIN_BASE_URL to the published Pages origin. The server will not fall back to another project\'s archive.';
 
+function isLocalArchiveHost(hostname) {
+  const host = String(hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
 export function normalizeBaseUrl(value) {
   if (value == null || String(value).trim() === '') throw new Error(MISSING_ARCHIVE);
   const url = new URL(value);
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('SHIORI_BRAIN_BASE_URL must be an http(s) URL.');
+  if (url.protocol === 'https:') {
+    // allowed
+  } else if (url.protocol === 'http:' && isLocalArchiveHost(url.hostname)) {
+    // local debugging only
+  } else {
+    throw new Error('SHIORI_BRAIN_BASE_URL must be an https URL (http is allowed only for localhost).');
   }
   url.hash = '';
   url.search = '';

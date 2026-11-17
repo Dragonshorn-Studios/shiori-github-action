@@ -253,7 +253,7 @@ Titles are Unicode-normalized and sanitized into lowercase paths. The first hier
 
 Every sync replaces the configured output directory. Do not put hand-written files there.
 
-When Pages output is enabled, Shiori also maintains `docs/_config.yml`, `docs/index.md`, `docs/index.json`, `docs/raw/`, `docs/_data/shiori-nav.yml`, `docs/_data/shiori-mcp.yml`, `docs/_layouts/default.html`, `docs/_includes/nav.html`, and `docs/assets/css/shiori.css`. Each Pages compile removes `docs/raw/` and `docs/index.json` before rewriting them so renamed or deleted documents do not stay published. Disable `pages` if those paths belong to an existing documentation site.
+When Pages output is enabled, Shiori also maintains `docs/_config.yml`, `docs/index.md`, `docs/index.json`, `docs/raw/`, `docs/_data/shiori-nav.yml`, `docs/_data/shiori-mcp.yml`, `docs/_layouts/default.html`, `docs/_includes/nav.html`, and `docs/assets/css/shiori.css`. Each Pages compile removes `docs/raw/` and `docs/index.json` before rewriting them so renamed or deleted documents do not stay published. `pages` requires a nested `output-directory`; `raw/` and `index.json` next to it are generated and get replaced. Disable `pages` if those paths belong to an existing documentation site.
 
 Skill and agent generation maintains only the files listed in `.shiori/generated-skills.json`, plus the Shiori entries in the four root marketplace manifests. Existing non-Shiori marketplace entries are preserved.
 

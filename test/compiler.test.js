@@ -116,6 +116,21 @@ test('rejects an output directory outside the repository', async () => {
   await assert.rejects(() => compile(new FixtureSource(), { ...baseConfig, repositoryRoot, outputDirectory: '../escape' }), /escapes the repository/);
 });
 
+test('pages refuses an output-directory whose parent is the repository root', async () => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-pages-root-'));
+  const rawKeep = join(repositoryRoot, 'raw/keep.md');
+  await mkdir(join(repositoryRoot, 'raw'), { recursive: true });
+  await writeFile(rawKeep, '# keep\n');
+  await writeFile(join(repositoryRoot, 'index.json'), '{"keep":true}\n');
+  await assert.rejects(
+    () => compile(new FixtureSource(), { ...baseConfig, repositoryRoot, pages: true, outputDirectory: 'brain' }),
+    /pages requires a nested output-directory/
+  );
+  assert.equal(await readFile(rawKeep, 'utf8'), '# keep\n');
+  assert.equal(await readFile(join(repositoryRoot, 'index.json'), 'utf8'), '{"keep":true}\n');
+  assert.equal(existsSync(join(repositoryRoot, 'brain')), false);
+});
+
 test('generates a dependency-free Pages shell and recursive navigation', async () => {
   const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-pages-'));
   await compile(new TaggedFixtureSource(), {

@@ -177,13 +177,34 @@ archive_url() {
   owner=\${repository%%/*}
   repo=\${repository#*/}
   [ -n \"$owner\" ] && [ -n \"$repo\" ] && [ \"$repository\" != \"$owner\" ] || return 1
-  printf 'https://%s.github.io/%s/\\n' \"$owner\" \"$repo\" | tr '[:upper:]' '[:lower:]'
+  owner_lc=$(printf '%s' \"$owner\" | tr '[:upper:]' '[:lower:]')
+  repo_lc=$(printf '%s' \"$repo\" | tr '[:upper:]' '[:lower:]')
+  if [ \"$repo_lc\" = \"$owner_lc.github.io\" ]; then
+    printf 'https://%s.github.io/\\n' \"$owner_lc\"
+    return 0
+  fi
+  printf 'https://%s.github.io/%s/\\n' \"$owner_lc\" \"$repo\"
+}
+is_allowed_archive_url() {
+  lowered=$(printf '%s' \"$1\" | tr '[:upper:]' '[:lower:]')
+  case $lowered in
+    https://*) return 0 ;;
+  esac
+  rest=\${lowered#http://}
+  [ \"$rest\" != \"$lowered\" ] || return 1
+  hostport=\${rest%%/*}
+  case $hostport in
+    localhost|localhost:*|127.0.0.1|127.0.0.1:*) return 0 ;;
+    \\[::1\\]|\\[::1\\]:*) return 0 ;;
+  esac
+  return 1
 }
 run_mcp_cli() {
   has_command node || { printf '%s\\n' 'Skipping MCP config: node is not available.'; return 0; }
   helper=$(resolve_mcp_helper) || return 1
   pages_origin=$(archive_url) || pages_origin=''
   [ -n \"$pages_origin\" ] || { printf '%s\\n' 'Set SHIORI_BRAIN_BASE_URL to the published Pages origin before installing MCP servers. The installer will not fall back to another project archive.' >&2; return 1; }
+  is_allowed_archive_url \"$pages_origin\" || { printf '%s\\n' 'SHIORI_BRAIN_BASE_URL must be an https URL (http is allowed only for localhost).' >&2; return 1; }
   node \"$helper\" \"$@\" --home \"$HOME\" --checkout \"$checkout\" --base-url \"$pages_origin\"
 }
 contains_text() {
@@ -496,6 +517,16 @@ function Get-ShioriArchiveUrl {
     return \"https://$Owner.github.io/$Repo/\"
 }
 
+function Test-ShioriArchiveUrl {
+    param([string]$Url)
+    try { $Parsed = [Uri]$Url } catch { return $false }
+    if (-not $Parsed.IsAbsoluteUri) { return $false }
+    if ($Parsed.Scheme -eq 'https') { return $true }
+    if ($Parsed.Scheme -ne 'http') { return $false }
+    $HostName = $Parsed.Host.Trim('[]').ToLowerInvariant()
+    return @('localhost', '127.0.0.1', '::1') -contains $HostName
+}
+
 function Invoke-McpCli {
     param([string[]]$McpArgs)
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
@@ -504,6 +535,7 @@ function Invoke-McpCli {
     }
     $ArchiveUrl = Get-ShioriArchiveUrl
     if (-not $ArchiveUrl) { throw 'Set SHIORI_BRAIN_BASE_URL to the published Pages origin before installing MCP servers. The installer will not fall back to another project''s archive.' }
+    if (-not (Test-ShioriArchiveUrl $ArchiveUrl)) { throw 'SHIORI_BRAIN_BASE_URL must be an https URL (http is allowed only for localhost).' }
     $Helper = Get-McpHelper
     & node $Helper @McpArgs --home $HOME --checkout $ManagedCheckout --base-url $ArchiveUrl
     if ($LASTEXITCODE -ne 0) { throw \"Shiori MCP helper failed with exit code $LASTEXITCODE\" }

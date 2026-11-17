@@ -11,6 +11,9 @@ const MANAGED_END = '<!-- shiori:end -->';
 
 export async function compile(source, config) {
   const outputRoot = safeRepositoryPath(config.repositoryRoot, config.outputDirectory);
+  if (config.pages && dirname(outputRoot) === resolve(config.repositoryRoot)) {
+    throw new Error('pages requires a nested output-directory; raw/ and index.json next to it are generated and get replaced.');
+  }
   const documents = await collectDocuments(source, config);
   const pathById = assignPaths(documents, config.rootDocumentId);
   let skillTaggedIds = new Set();

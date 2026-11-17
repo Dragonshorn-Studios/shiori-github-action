@@ -15,6 +15,7 @@ import {
   cliGetIsNotFound,
   githubPagesUrl,
   mcpServerCatalog,
+  normalizeArchiveUrl,
   parseCliMcpEntry,
   renderMcpDataYaml,
   renderMcpMarkdownTable,
@@ -386,11 +387,67 @@ test('runMcpCli verify reports missing, ok, and conflict without writing', async
   assert.ok(reports.some(item => item.name === 'shiori-brain' && item.status === 'missing'));
 });
 
+function shellDoctorFn(name) {
+  const doctor = installSupportFiles({ repository: 'nopath' }).get('scripts/shiori-doctor.sh');
+  const match = doctor.match(new RegExp(`\\n${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`));
+  assert.ok(match, `${name} missing from doctor`);
+  return match[0];
+}
+
+function shellArchiveUrl(repository) {
+  const script = [
+    'repository="$1"',
+    'default_archive_url=""',
+    'unset SHIORI_BRAIN_BASE_URL',
+    shellDoctorFn('archive_url'),
+    'archive_url'
+  ].join('\n');
+  try {
+    return execFileSync('sh', ['-c', script, 'archive_url', repository], { encoding: 'utf8' }).trim();
+  } catch {
+    return '';
+  }
+}
+
+function shellAllowsArchiveUrl(url) {
+  const script = [shellDoctorFn('is_allowed_archive_url'), 'is_allowed_archive_url "$1"'].join('\n');
+  try {
+    execFileSync('sh', ['-c', script, 'is_allowed_archive_url', url], { encoding: 'utf8', stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 test('githubPagesUrl derives the published Pages origin', () => {
   assert.equal(githubPagesUrl('example/project'), 'https://example.github.io/project/');
+  assert.equal(githubPagesUrl('example/Project'), 'https://example.github.io/Project/');
   assert.equal(githubPagesUrl('Dragonshorn-Studios/shiori-brain'), 'https://dragonshorn-studios.github.io/shiori-brain/');
   assert.equal(githubPagesUrl('Acme/acme.github.io'), 'https://acme.github.io/');
+  assert.equal(githubPagesUrl('Acme/Acme.github.io'), 'https://acme.github.io/');
   assert.equal(githubPagesUrl(''), '');
+  for (const repository of ['example/project', 'example/Project', 'Dragonshorn-Studios/shiori-brain', 'Acme/acme.github.io', 'Acme/Acme.github.io', '']) {
+    assert.equal(shellArchiveUrl(repository), githubPagesUrl(repository), repository);
+  }
+});
+
+test('normalizeArchiveUrl allows https and localhost http only', () => {
+  assert.equal(normalizeArchiveUrl('https://example.github.io/project'), 'https://example.github.io/project/');
+  assert.equal(normalizeArchiveUrl('http://localhost:4173/archive'), 'http://localhost:4173/archive/');
+  assert.equal(normalizeArchiveUrl('http://127.0.0.1/'), 'http://127.0.0.1/');
+  assert.equal(normalizeArchiveUrl('http://[::1]/brain'), 'http://[::1]/brain/');
+  assert.throws(() => normalizeArchiveUrl('http://example.github.io/project/'), /https URL/);
+  assert.throws(() => normalizeArchiveUrl('http://localhost.evil.example/'), /https URL/);
+  assert.throws(
+    () => runMcpCli(['verify', '--home', '/tmp', '--host', 'cursor'], { env: { ...process.env, [ARCHIVE_ENV]: 'http://example.github.io/project/' } }),
+    /https URL/
+  );
+  assert.ok(shellAllowsArchiveUrl('https://example.github.io/Project/'));
+  assert.ok(shellAllowsArchiveUrl('http://localhost:4173/archive'));
+  assert.ok(shellAllowsArchiveUrl('http://127.0.0.1/'));
+  assert.ok(shellAllowsArchiveUrl('http://[::1]/brain'));
+  assert.equal(shellAllowsArchiveUrl('http://example.github.io/project/'), false);
+  assert.equal(shellAllowsArchiveUrl('http://localhost.evil.example/'), false);
 });
 
 test('parseCliMcpEntry reads Claude labeled get and Codex transport JSON', () => {

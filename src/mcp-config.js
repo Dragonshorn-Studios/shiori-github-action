@@ -83,10 +83,19 @@ export function githubPagesUrl(repository) {
   return `https://${host}.github.io/${repo}/`;
 }
 
+function isLocalArchiveHost(hostname) {
+  const host = String(hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
 export function normalizeArchiveUrl(value) {
   const url = new URL(value);
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error(`${ARCHIVE_ENV} must be an http(s) URL.`);
+  if (url.protocol === 'https:') {
+    // allowed
+  } else if (url.protocol === 'http:' && isLocalArchiveHost(url.hostname)) {
+    // local debugging only
+  } else {
+    throw new Error(`${ARCHIVE_ENV} must be an https URL (http is allowed only for localhost).`);
   }
   url.hash = '';
   url.search = '';

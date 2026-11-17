@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { handleRequest, parseBaseUrl } from '../src/index.js';
-import { createKnowledgeClient, searchDocuments } from '../src/knowledge.js';
+import { createKnowledgeClient, normalizeBaseUrl, searchDocuments } from '../src/knowledge.js';
 
 const documents = [
   { id: 'root', title: 'Project Brain', summary: 'Start here for architecture and product.', tags: [], url: 'raw/overview.md' },
@@ -34,6 +34,13 @@ test('knowledge client requires a Pages origin and does not use another project 
   assert.throws(() => parseBaseUrl([], {}), /will not fall back to another project's archive/);
   assert.equal(parseBaseUrl(['--base-url', 'https://example.test/shiori-brain/'], {}), 'https://example.test/shiori-brain/');
   assert.equal(parseBaseUrl([], { SHIORI_BRAIN_BASE_URL: 'https://example.test/shiori-brain/' }), 'https://example.test/shiori-brain/');
+});
+
+test('knowledge archive origin allows https and localhost http only', () => {
+  assert.equal(normalizeBaseUrl('https://example.test/shiori-brain').href, 'https://example.test/shiori-brain/');
+  assert.equal(normalizeBaseUrl('http://127.0.0.1:4173/archive').href, 'http://127.0.0.1:4173/archive/');
+  assert.throws(() => normalizeBaseUrl('http://example.test/shiori-brain/'), /https URL/);
+  assert.throws(() => createKnowledgeClient({ baseUrl: 'http://example.test/shiori-brain/' }), /https URL/);
 });
 
 test('search matches title, summary, tags, and id from the published index', async () => {
