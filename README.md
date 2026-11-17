@@ -8,11 +8,9 @@ AFFiNE remains the source of truth. Shiori is an exporter, not another knowledge
 AFFiNE root document
   └─ same-workspace links
        ↓
-docs/brain/
-  ├─ README.md
-  ├─ overview.md
-  ├─ hierarchy-derived Markdown paths
-  └─ manifest.json
+docs/brain/                 Markdown snapshot + manifest
+docs/index.json             Pages knowledge index
+docs/raw/                   raw Markdown for on-demand MCP reads
        ├─ AGENTS.md bootstrap
        ├─ tagged Agent Skills + specialized review agents
        ├─ plugin marketplaces
@@ -184,7 +182,9 @@ Following the cross-agent layout used by [`Rughalt/coding-agent-plugins`](https:
 | Vibe | `.vibe/skills/<name>/` |
 | Devin project sessions | `.devin/skills/<name>/` |
 
-Shiori also generates `AGENT-SETUP.md` and read-only `scripts/shiori-doctor.sh` / `scripts/shiori-doctor.ps1` helpers. They detect local CLIs and configuration directories, distinguish cloud-capable hosts such as Devin, and report whether Shiori is installed whenever a reliable non-interactive local check exists. Codex and Claude status uses the doctor's own successful-install record so a read-only run never launches either client. Hosts without a safe check are marked `unknown` instead of being guessed. The same generation pass emits a portable Agent Plugins `plugins/shiori/plugin.json` and a Codex-native `.agents/plugins/marketplace.json`; `.codex-plugin/plugin.json` remains as a compatibility fallback.
+Shiori also generates `AGENT-SETUP.md` and read-only `scripts/shiori-doctor.sh` / `scripts/shiori-doctor.ps1` helpers. They detect local CLIs and configuration directories, distinguish cloud-capable hosts such as Devin, and report whether Shiori is installed whenever a reliable non-interactive local check exists. Codex and Claude status uses the doctor's own successful-install record so a read-only run never launches either client (including `claude mcp` / `codex mcp`). Hosts without a safe check are marked `unknown` instead of being guessed. The same generation pass emits a portable Agent Plugins `plugins/shiori/plugin.json` and a Codex-native `.agents/plugins/marketplace.json`; `.codex-plugin/plugin.json` remains as a compatibility fallback.
+
+Default doctor mode never writes home-directory configuration. Under explicit `--install` / `--update` for Cursor, Claude Code, and Codex, the doctor also adds a local stdio MCP entry for [`shiori-brain-mcp`](packages/shiori-brain-mcp) (`node ~/.local/share/shiori/shiori-brain/packages/shiori-brain-mcp/src/index.js`) plus Storytold Craft CLIs that are already on `PATH` (`<name>-cli mcp`). The installed `shiori-brain` entry sets `SHIORI_BRAIN_BASE_URL` to this project's GitHub Pages origin (`https://<owner>.github.io/<repo>/`, or `https://<owner>.github.io/` for a `owner.github.io` user site). Override that with the `SHIORI_BRAIN_BASE_URL` environment variable when Pages uses a custom domain. The installer and the MCP server fail instead of reading another project's archive when the origin cannot be determined. Cursor is written through `~/.cursor/mcp.json`; Claude Code and Codex are registered through `claude mcp add -s user --env SHIORI_BRAIN_BASE_URL=...` and `codex mcp add --env SHIORI_BRAIN_BASE_URL=...`. Existing non-Shiori MCP entries are left untouched. `--install cursor` writes only MCP config; it does not install the Cursor plugin.
 
 The generated guide includes `curl | sh` and PowerShell `irm | iex` entry points, so the doctor can run without cloning the generated knowledge repository. Remote mode performs detection only and recommends repository-backed marketplace installation; it never assumes project adapters exist in the current directory.
 
@@ -253,11 +253,11 @@ Titles are Unicode-normalized and sanitized into lowercase paths. The first hier
 
 Every sync replaces the configured output directory. Do not put hand-written files there.
 
-When Pages output is enabled, Shiori also maintains `docs/_config.yml`, `docs/index.md`, `docs/_data/shiori-nav.yml`, `docs/_layouts/default.html`, `docs/_includes/nav.html`, and `docs/assets/css/shiori.css`. Disable `pages` if those paths belong to an existing documentation site.
+When Pages output is enabled, Shiori also maintains `docs/_config.yml`, `docs/index.md`, `docs/index.json`, `docs/raw/`, `docs/_data/shiori-nav.yml`, `docs/_data/shiori-mcp.yml`, `docs/_layouts/default.html`, `docs/_includes/nav.html`, and `docs/assets/css/shiori.css`. Each Pages compile removes `docs/raw/` and `docs/index.json` before rewriting them so renamed or deleted documents do not stay published. `pages` requires a nested `output-directory`; `raw/` and `index.json` next to it are generated and get replaced. Disable `pages` if those paths belong to an existing documentation site.
 
 Skill and agent generation maintains only the files listed in `.shiori/generated-skills.json`, plus the Shiori entries in the four root marketplace manifests. Existing non-Shiori marketplace entries are preserved.
 
-Shiori updates only the section between `<!-- shiori:start -->` and `<!-- shiori:end -->` in `AGENTS.md`, preserving repository-specific instructions outside it.
+Shiori updates only the section between `<!-- shiori:start -->` and `<!-- shiori:end -->` in `AGENTS.md`, preserving repository-specific instructions outside it. That managed section includes a one-line hint to consult shiori-brain on demand; skills stay procedures, not a knowledge dump.
 
 ### Jekyll template sources
 
@@ -269,7 +269,15 @@ With `pages: true`, Shiori writes a no-plugin Jekyll shell beside the generated 
 
 Before deploying, enable Pages in the target repository under **Settings → Pages → Build and deployment → Source: GitHub Actions**. Without that setting, `actions/deploy-pages` fails because Pages is not enabled.
 
-Copy [`examples/pages.yml`](examples/pages.yml) to `.github/workflows/pages.yml` and run the workflow. Navigation is generated from the same AFFiNE hierarchy as `docs/brain/README.md`.
+Copy [`examples/pages.yml`](examples/pages.yml) to `.github/workflows/pages.yml` and run the workflow. Navigation is generated from the same AFFiNE hierarchy as `docs/brain/README.md`. The published site also includes `index.json` and raw Markdown under `/raw/` so a local MCP client can search and read the snapshot without a backend.
+
+### On-demand MCP reads
+
+[`packages/shiori-brain-mcp`](packages/shiori-brain-mcp) is a small read-only stdio MCP server. It fetches `index.json` and raw Markdown from the Pages site and exposes `search` and `read_doc`. The doctor pins the archive origin to the installing project's Pages URL through `SHIORI_BRAIN_BASE_URL`. Manual launches must pass `--base-url` or set that environment variable; there is no fallback to another project's site. There are no secrets, tokens, or write tools.
+
+```bash
+node ~/.local/share/shiori/shiori-brain/packages/shiori-brain-mcp/src/index.js --base-url https://OWNER.github.io/REPO/
+```
 
 ## Local development
 
@@ -289,10 +297,10 @@ For a manual live run, GitHub Actions maps input names from `action.yml` to envi
 
 - `AffineMcpSource` fetches normalized documents, tags, and custom properties through a local read-only MCP process.
 - `collectDocuments` enforces the bounded traversal and produces normalized documents.
-- The compiler assigns deterministic paths, rewrites internal links, and emits the index and manifest.
-- Thin output adapters maintain the managed `AGENTS.md` section, optional Jekyll shell, standards-compatible Agent Skills, native Claude/ZCode subagents, and marketplace manifests.
+- The compiler assigns deterministic paths, rewrites internal links, and emits the index, manifest, Pages `index.json`, and raw Markdown copies.
+- Thin output adapters maintain the managed `AGENTS.md` section, optional Jekyll shell, standards-compatible Agent Skills, native Claude/ZCode subagents, marketplace manifests, and doctor/MCP support files.
 
-There is no database, backend, account system, webhook service, RAG layer, or MCP server.
+There is no database, hosted backend, account system, webhook service, or RAG layer. GitHub Pages remains the published snapshot. `shiori-brain-mcp` is a local stdio consumer of that snapshot, not a replacement for `AffineMcpSource`.
 
 ## Current AFFiNE limitations
 

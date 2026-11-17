@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -115,6 +116,21 @@ test('rejects an output directory outside the repository', async () => {
   await assert.rejects(() => compile(new FixtureSource(), { ...baseConfig, repositoryRoot, outputDirectory: '../escape' }), /escapes the repository/);
 });
 
+test('pages refuses an output-directory whose parent is the repository root', async () => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-pages-root-'));
+  const rawKeep = join(repositoryRoot, 'raw/keep.md');
+  await mkdir(join(repositoryRoot, 'raw'), { recursive: true });
+  await writeFile(rawKeep, '# keep\n');
+  await writeFile(join(repositoryRoot, 'index.json'), '{"keep":true}\n');
+  await assert.rejects(
+    () => compile(new FixtureSource(), { ...baseConfig, repositoryRoot, pages: true, outputDirectory: 'brain' }),
+    /pages requires a nested output-directory/
+  );
+  assert.equal(await readFile(rawKeep, 'utf8'), '# keep\n');
+  assert.equal(await readFile(join(repositoryRoot, 'index.json'), 'utf8'), '{"keep":true}\n');
+  assert.equal(existsSync(join(repositoryRoot, 'brain')), false);
+});
+
 test('generates a dependency-free Pages shell and recursive navigation', async () => {
   const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-pages-'));
   await compile(new TaggedFixtureSource(), {
@@ -129,6 +145,12 @@ test('generates a dependency-free Pages shell and recursive navigation', async (
   const layout = await readFile(join(repositoryRoot, 'docs/_layouts/default.html'), 'utf8');
   const nav = await readFile(join(repositoryRoot, 'docs/_data/shiori-nav.yml'), 'utf8');
   const css = await readFile(join(repositoryRoot, 'docs/assets/css/shiori.css'), 'utf8');
+  const home = await readFile(join(repositoryRoot, 'docs/index.md'), 'utf8');
+  const mcp = await readFile(join(repositoryRoot, 'docs/_data/shiori-mcp.yml'), 'utf8');
+  const indexText = await readFile(join(repositoryRoot, 'docs/index.json'), 'utf8');
+  const index = JSON.parse(indexText);
+  const raw = await readFile(join(repositoryRoot, 'docs/raw/architecture-apis.md'), 'utf8');
+  const rawNested = await readFile(join(repositoryRoot, 'docs/raw/architecture-apis/use-git-for-history.md'), 'utf8');
   assert.match(layout, /include nav\.html/);
   assert.match(nav, /children:/);
   assert.match(nav, /Architecture & APIs/);
@@ -141,6 +163,45 @@ test('generates a dependency-free Pages shell and recursive navigation', async (
   assert.match(css, /--gold:/);
   assert.match(css, /--accent: #c288f7/);
   assert.match(css, /var\(--glow\)/);
+  assert.match(home, /site.data.shiori-mcp/);
+  assert.match(mcp, /name: "shiori-brain"/);
+  assert.match(mcp, /command: "node ~\/.local\/share\/shiori\/shiori-brain\/packages\/shiori-brain-mcp\/src\/index.js"/);
+  assert.match(mcp, /command: "figcraft-cli mcp"/);
+  assert.match(mcp, /when_installed: true/);
+  assert.doesNotMatch(mcp, /npx/);
+  assert.equal(index.schemaVersion, 1);
+  assert.deepEqual(index.documents.map(item => item.id).sort(), ['architecture', 'decision-one', 'product', 'root']);
+  const architecture = index.documents.find(item => item.id === 'architecture');
+  assert.equal(architecture.url, 'raw/architecture-apis.md');
+  assert.ok(architecture.summary);
+  assert.deepEqual(architecture.tags, ['skill', 'agent']);
+  assert.doesNotMatch(JSON.stringify(index), /token/i);
+  assert.doesNotMatch(raw, /^---$/m);
+  assert.match(raw, /See \[Decision\]/);
+  assert.match(rawNested, /# Decision/);
+  await compile(new TaggedFixtureSource(), {
+    ...baseConfig,
+    repositoryRoot,
+    pages: true,
+    skillTag: 'skill',
+    agentTag: 'agent',
+    skillsDirectory: '.agents/skills',
+    pluginDirectory: 'plugins'
+  });
+  assert.equal(await readFile(join(repositoryRoot, 'docs/index.json'), 'utf8'), indexText);
+});
+
+test('pages compile removes stale generated raw markdown and index.json', async () => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-pages-stale-'));
+  const staleRaw = join(repositoryRoot, 'docs/raw/retired.md');
+  await mkdir(join(repositoryRoot, 'docs/raw'), { recursive: true });
+  await writeFile(staleRaw, '# leftover\n');
+  await writeFile(join(repositoryRoot, 'docs/index.json'), '{"documents":[{"id":"retired"}]}');
+  await compile(new FixtureSource(), { ...baseConfig, repositoryRoot, pages: true });
+  assert.equal(existsSync(staleRaw), false);
+  const index = JSON.parse(await readFile(join(repositoryRoot, 'docs/index.json'), 'utf8'));
+  assert.equal(index.documents.some(item => item.id === 'retired'), false);
+  assert.ok(existsSync(join(repositoryRoot, 'docs/raw/overview.md')));
 });
 
 test('pages nav lists each URL once, uses agent H1 titles, and keeps untagged children', async () => {
@@ -249,8 +310,12 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   const setupGuide = await readFile(join(repositoryRoot, 'AGENT-SETUP.md'), 'utf8');
   assert.match(setupGuide, /curl -fsSL/);
   assert.match(setupGuide, /irm .* \| iex/);
-  assert.match(setupGuide, /--install opencode mcode vibe codex claude/);
+  assert.match(setupGuide, /--install opencode mcode vibe codex claude cursor/);
   assert.match(setupGuide, /--update/);
+  assert.match(setupGuide, /figcraft-cli mcp/);
+  assert.match(setupGuide, /claude mcp add -s user/);
+  assert.match(setupGuide, /Consult shiori-brain on demand/);
+  assert.doesNotMatch(setupGuide, /npx -y shiori-brain-mcp/);
   const shellDoctor = await readFile(join(repositoryRoot, 'scripts/shiori-doctor.sh'), 'utf8');
   assert.match(shellDoctor, /context='remote'/);
   assert.match(shellDoctor, /codex plugin add/);
@@ -260,6 +325,15 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(shellDoctor, /Shiori: %s/);
   assert.match(shellDoctor, /shared_skills_installed/);
   assert.match(shellDoctor, /host_is_recorded codex/);
+  assert.match(shellDoctor, /run_mcp_cli install --host cursor/);
+  assert.doesNotMatch(shellDoctor, /run_mcp_cli verify/);
+  assert.match(shellDoctor, /--base-url/);
+  assert.match(shellDoctor, /https:\/\/example\.github\.io\/project\//);
+  assert.match(shellDoctor, /A read-only run does not launch host CLIs/);
+  assert.match(shellDoctor, /--checkout \"\$checkout\"/);
+  assert.match(shellDoctor, /packages\/shiori-brain-mcp\/src\/index.js/);
+  assert.match(shellDoctor, /mktemp -d/);
+  assert.doesNotMatch(shellDoctor, /shiori-mcp-\$\$/);
   const powerShellDoctor = await readFile(join(repositoryRoot, 'scripts/shiori-doctor.ps1'), 'utf8');
   assert.match(powerShellDoctor, /Get-Command/);
   assert.match(powerShellDoctor, /'remote'/);
@@ -269,4 +343,15 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(powerShellDoctor, /Get-ShioriInstallStatus/);
   assert.match(powerShellDoctor, /Test-SharedSkillsInstalled/);
   assert.match(powerShellDoctor, /Test-RecordedHost codex/);
+  assert.match(powerShellDoctor, /Invoke-McpCli -McpArgs @\('install', '--host', 'cursor'\)/);
+  assert.doesNotMatch(powerShellDoctor, /Invoke-McpCli -McpArgs @\('verify'\)/);
+  assert.match(powerShellDoctor, /--base-url \$ArchiveUrl/);
+  assert.match(powerShellDoctor, /A read-only run does not launch host CLIs/);
+  assert.match(powerShellDoctor, /--checkout \$ManagedCheckout/);
+  assert.match(powerShellDoctor, /packages\/shiori-brain-mcp\/src\/index.js/);
+  const helper = await readFile(join(repositoryRoot, 'scripts/shiori-mcp.mjs'), 'utf8');
+  assert.match(helper, /figcraft-cli/);
+  assert.match(helper, /packages\/shiori-brain-mcp\/src\/index.js/);
+  assert.doesNotMatch(helper, /npx -y shiori-brain-mcp/);
+  await readFile(join(repositoryRoot, 'packages/shiori-brain-mcp/src/index.js'), 'utf8');
 });

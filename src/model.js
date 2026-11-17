@@ -22,6 +22,42 @@ export function normalizeMarkdown(value) {
   return renumberOrderedLists(normalized).trim() + '\n';
 }
 
+export function stripFrontmatter(value) {
+  return String(value ?? '').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+}
+
+export function summarizeMarkdown(markdown, maxLength = 160) {
+  const text = stripFrontmatter(markdown);
+  let fence = null;
+  const paragraph = [];
+  for (const rawLine of text.split('\n')) {
+    const fenceMatch = rawLine.match(/^\s*(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      if (!fence) fence = marker;
+      else if (marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    const line = rawLine.trim();
+    if (!line) {
+      if (paragraph.length) break;
+      continue;
+    }
+    if (/^#{1,6}(\s|$)/.test(line) || /^>/.test(line) || /^[-*_]{3,}$/.test(line)) {
+      if (paragraph.length) break;
+      continue;
+    }
+    paragraph.push(line.replace(/\s+/g, ' '));
+  }
+  const summary = paragraph.join(' ').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+  if (summary.length <= maxLength) return summary;
+  const trimmed = summary.slice(0, maxLength - 1);
+  const lastSpace = trimmed.lastIndexOf(' ');
+  const clipped = (lastSpace > 80 ? trimmed.slice(0, lastSpace) : trimmed).replace(/[,:;.-]+$/, '');
+  return `${clipped}…`;
+}
+
 export function stableJson(value) {
   return JSON.stringify(sortObject(value), null, 2) + '\n';
 }
