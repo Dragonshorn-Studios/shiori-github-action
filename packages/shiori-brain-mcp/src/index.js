@@ -2,7 +2,7 @@
 import { createInterface } from 'node:readline';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createKnowledgeClient, DEFAULT_BASE_URL } from './knowledge.js';
+import { createKnowledgeClient } from './knowledge.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 const TOOLS = [
@@ -29,10 +29,17 @@ const TOOLS = [
   }
 ];
 
-function parseBaseUrl(argv, env) {
+export function parseBaseUrl(argv, env) {
   const flagIndex = argv.indexOf('--base-url');
-  if (flagIndex >= 0) return argv[flagIndex + 1];
-  return env.SHIORI_BRAIN_BASE_URL || DEFAULT_BASE_URL;
+  if (flagIndex >= 0) {
+    const value = argv[flagIndex + 1];
+    if (!value || value.startsWith('-')) {
+      throw new Error('Pass a Pages origin after --base-url. The server will not fall back to another project\'s archive.');
+    }
+    return value;
+  }
+  if (env.SHIORI_BRAIN_BASE_URL) return env.SHIORI_BRAIN_BASE_URL;
+  throw new Error('Pass --base-url or set SHIORI_BRAIN_BASE_URL to the published Pages origin. The server will not fall back to another project\'s archive.');
 }
 
 function send(message) {

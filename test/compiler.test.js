@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -175,6 +176,19 @@ test('generates a dependency-free Pages shell and recursive navigation', async (
   assert.equal(await readFile(join(repositoryRoot, 'docs/index.json'), 'utf8'), indexText);
 });
 
+test('pages compile removes stale generated raw markdown and index.json', async () => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-pages-stale-'));
+  const staleRaw = join(repositoryRoot, 'docs/raw/retired.md');
+  await mkdir(join(repositoryRoot, 'docs/raw'), { recursive: true });
+  await writeFile(staleRaw, '# leftover\n');
+  await writeFile(join(repositoryRoot, 'docs/index.json'), '{"documents":[{"id":"retired"}]}');
+  await compile(new FixtureSource(), { ...baseConfig, repositoryRoot, pages: true });
+  assert.equal(existsSync(staleRaw), false);
+  const index = JSON.parse(await readFile(join(repositoryRoot, 'docs/index.json'), 'utf8'));
+  assert.equal(index.documents.some(item => item.id === 'retired'), false);
+  assert.ok(existsSync(join(repositoryRoot, 'docs/raw/overview.md')));
+});
+
 test('pages nav lists each URL once, uses agent H1 titles, and keeps untagged children', async () => {
   const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-nav-titles-'));
   await compile(new AgentNavFixtureSource(), {
@@ -297,7 +311,10 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(shellDoctor, /shared_skills_installed/);
   assert.match(shellDoctor, /host_is_recorded codex/);
   assert.match(shellDoctor, /run_mcp_cli install --host cursor/);
-  assert.match(shellDoctor, /run_mcp_cli verify/);
+  assert.doesNotMatch(shellDoctor, /run_mcp_cli verify/);
+  assert.match(shellDoctor, /--base-url/);
+  assert.match(shellDoctor, /https:\/\/example\.github\.io\/project\//);
+  assert.match(shellDoctor, /A read-only run does not launch host CLIs/);
   assert.match(shellDoctor, /--checkout \"\$checkout\"/);
   assert.match(shellDoctor, /packages\/shiori-brain-mcp\/src\/index.js/);
   assert.match(shellDoctor, /mktemp -d/);
@@ -312,6 +329,9 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(powerShellDoctor, /Test-SharedSkillsInstalled/);
   assert.match(powerShellDoctor, /Test-RecordedHost codex/);
   assert.match(powerShellDoctor, /Invoke-McpCli -McpArgs @\('install', '--host', 'cursor'\)/);
+  assert.doesNotMatch(powerShellDoctor, /Invoke-McpCli -McpArgs @\('verify'\)/);
+  assert.match(powerShellDoctor, /--base-url \$ArchiveUrl/);
+  assert.match(powerShellDoctor, /A read-only run does not launch host CLIs/);
   assert.match(powerShellDoctor, /--checkout \$ManagedCheckout/);
   assert.match(powerShellDoctor, /packages\/shiori-brain-mcp\/src\/index.js/);
   const helper = await readFile(join(repositoryRoot, 'scripts/shiori-mcp.mjs'), 'utf8');

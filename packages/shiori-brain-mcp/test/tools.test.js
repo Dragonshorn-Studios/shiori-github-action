@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { handleRequest } from '../src/index.js';
+import { handleRequest, parseBaseUrl } from '../src/index.js';
 import { createKnowledgeClient, searchDocuments } from '../src/knowledge.js';
 
 const documents = [
@@ -28,6 +28,13 @@ function fetchImpl(url) {
 function client(baseUrl = 'https://example.test/shiori-brain/') {
   return createKnowledgeClient({ baseUrl, fetchImpl });
 }
+
+test('knowledge client requires a Pages origin and does not use another project archive', () => {
+  assert.throws(() => createKnowledgeClient(), /will not fall back to another project's archive/);
+  assert.throws(() => parseBaseUrl([], {}), /will not fall back to another project's archive/);
+  assert.equal(parseBaseUrl(['--base-url', 'https://example.test/shiori-brain/'], {}), 'https://example.test/shiori-brain/');
+  assert.equal(parseBaseUrl([], { SHIORI_BRAIN_BASE_URL: 'https://example.test/shiori-brain/' }), 'https://example.test/shiori-brain/');
+});
 
 test('search matches title, summary, tags, and id from the published index', async () => {
   const knowledge = client();

@@ -55,6 +55,8 @@ export async function compile(source, config) {
   if (config.agentFile) await updateAgentFile(config);
   if (config.pages) {
     const docsRoot = dirname(outputRoot);
+    await rm(join(docsRoot, 'raw'), { recursive: true, force: true });
+    await rm(join(docsRoot, 'index.json'), { force: true });
     await write(docsRoot, '_data/shiori-nav.yml', renderNavigation(documents, pathById, config.rootDocumentId, agentTaggedIds, skillTaggedIds));
     await write(docsRoot, '_data/shiori-mcp.yml', renderMcpDataYaml());
     await write(docsRoot, 'index.json', stableJson(createKnowledgeIndex(written, skillTaggedIds, agentTaggedIds)));

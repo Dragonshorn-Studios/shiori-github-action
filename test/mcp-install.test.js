@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { chmodSync, existsSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
@@ -7,11 +7,13 @@ import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { installSupportFiles } from '../src/install-support.js';
 import {
+  ARCHIVE_ENV,
   CRAFT_APPS,
   applyInstructionFile,
   applyJsonMcpConfig,
   classifyEntry,
   cliGetIsNotFound,
+  githubPagesUrl,
   mcpServerCatalog,
   parseCliMcpEntry,
   renderMcpDataYaml,
@@ -22,12 +24,18 @@ import {
 } from '../src/mcp-config.js';
 
 const figcraft = { name: 'figcraft', command: 'figcraft-cli', args: ['mcp'] };
+const ARCHIVE_URL = 'https://example.github.io/project/';
 
-function shioriFor(home) {
+function withArchive(env = process.env) {
+  return { ...env, [ARCHIVE_ENV]: ARCHIVE_URL };
+}
+
+function shioriFor(home, archiveUrl = ARCHIVE_URL) {
   return {
     name: 'shiori-brain',
     command: 'node',
-    args: [shioriBrainScript(join(home, '.local/share/shiori/shiori-brain'))]
+    args: [shioriBrainScript(join(home, '.local/share/shiori/shiori-brain'))],
+    env: { [ARCHIVE_ENV]: archiveUrl }
   };
 }
 
@@ -37,14 +45,14 @@ async function writeExecutable(path, body) {
 }
 
 function fakeCraftPath(binDir) {
-  return {
+  return withArchive({
     ...process.env,
     PATH: `${binDir}${delimiter}${process.env.PATH}`
-  };
+  });
 }
 
 function positionalName(tokens) {
-  const skipValue = new Set(['--scope', '--transport']);
+  const skipValue = new Set(['--scope', '--transport', '--env']);
   const names = [];
   for (let i = 0; i < tokens.length; i += 1) {
     if (skipValue.has(tokens[i])) {
@@ -55,6 +63,70 @@ function positionalName(tokens) {
     names.push(tokens[i]);
   }
   return names[0];
+}
+
+function parseEnvFlags(tokens) {
+  const env = {};
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (tokens[i] !== '--env') continue;
+    const assignment = tokens[i + 1];
+    i += 1;
+    if (!assignment) continue;
+    const eq = assignment.indexOf('=');
+    if (eq <= 0) continue;
+    env[assignment.slice(0, eq)] = assignment.slice(eq + 1);
+  }
+  return Object.keys(env).length ? env : undefined;
+}
+
+function formatClaudeGet(name, entry) {
+  if (entry.url) {
+    return `${name}:
+  Scope: User config (available in all your projects)
+  Status: ✓ Connected
+  Type: http
+  URL: ${entry.url}
+`;
+  }
+  const args = Array.isArray(entry.args) ? entry.args.join(' ') : '';
+  const envLines = entry.env
+    ? Object.entries(entry.env).map(([key, value]) => `    ${key}: ${value}`).join('\n')
+    : '';
+  return `${name}:
+  Scope: User config (available in all your projects)
+  Status: ✓ Connected
+  Type: stdio
+  Command: ${entry.command}
+  Args: ${args}
+  Environment:
+${envLines}
+To remove this server, run: claude mcp remove "${name}" -s user
+`;
+}
+
+function formatCodexGet(name, entry) {
+  if (entry.url) {
+    return JSON.stringify({
+      name,
+      enabled: true,
+      transport: {
+        type: 'streamable_http',
+        url: entry.url,
+        http_headers: entry.headers ?? null
+      }
+    }, null, 2);
+  }
+  return JSON.stringify({
+    name,
+    enabled: true,
+    transport: {
+      type: 'stdio',
+      command: entry.command,
+      args: entry.args ?? [],
+      env: entry.env ?? null,
+      cwd: null
+    }
+  }, null, 2);
 }
 
 function fakeHostExec(store, { getFailures = {} } = {}) {
@@ -78,25 +150,23 @@ function fakeHostExec(store, { getFailures = {} } = {}) {
       }
       const entry = store[name];
       if (!entry) {
-        const error = new Error(`Unknown MCP server: ${name}`);
+        const error = new Error(`not found: ${name}`);
         error.status = 1;
         error.stdout = '';
-        error.stderr = error.message;
+        error.stderr = command === 'claude'
+          ? `No MCP server found with name: "${name}". Configured servers:`
+          : `No MCP server named '${name}' found.`;
         throw error;
       }
-      if (json) return `${JSON.stringify(entry)}\n`;
-      const lines = [];
-      if (entry.url) lines.push(`url: ${entry.url}`);
-      if (entry.command) lines.push(`command: ${entry.command}`);
-      if (entry.args) lines.push(`args: ${JSON.stringify(entry.args)}`);
-      return `${lines.join('\n')}\n`;
+      return json ? `${formatCodexGet(name, entry)}\n` : formatClaudeGet(name, entry);
     }
     if (action === 'add') {
       const dash = rest.indexOf('--');
       const before = dash >= 0 ? rest.slice(0, dash) : rest;
       const after = dash >= 0 ? rest.slice(dash + 1) : [];
       const name = positionalName(before);
-      store[name] = { command: after[0], args: after.slice(1) };
+      const env = parseEnvFlags(before);
+      store[name] = { command: after[0], args: after.slice(1), ...(env ? { env } : {}) };
       return '';
     }
     if (action === 'remove') {
@@ -141,7 +211,7 @@ test('JSON MCP install adds, skips absent craft CLIs, and leaves other keys alon
   const parsed = JSON.parse(added.text);
   assert.equal(parsed.theme, 'keep-me');
   assert.deepEqual(parsed.mcpServers.other, { command: 'uvx', args: ['something'] });
-  assert.deepEqual(parsed.mcpServers['shiori-brain'], { command: 'node', args: shiori.args });
+  assert.deepEqual(parsed.mcpServers['shiori-brain'], { command: 'node', args: shiori.args, env: shiori.env });
 
   const again = applyJsonMcpConfig(added.text, [shiori]);
   assert.equal(again.reports[0].status, 'unchanged');
@@ -199,6 +269,7 @@ test('JSON MCP install updates a stale Shiori-owned entry', async () => {
   const parsed = JSON.parse(result.text);
   assert.deepEqual(parsed.mcpServers['shiori-brain'].args, shiori.args);
   assert.equal(parsed.mcpServers['shiori-brain'].env.KEEP, 'yes');
+  assert.equal(parsed.mcpServers['shiori-brain'].env[ARCHIVE_ENV], ARCHIVE_URL);
 });
 
 test('npx or other package-registry entries are conflicts, not Shiori-owned', () => {
@@ -218,6 +289,8 @@ test('classifyEntry distinguishes missing, match, stale, and conflict', async ()
   assert.equal(classifyEntry({ command: '/opt/figcraft-cli', args: ['mcp'] }, figcraft), 'match');
   assert.equal(classifyEntry({ url: 'https://figcraft.example/mcp' }, figcraft), 'conflict');
   assert.equal(classifyEntry({ url: 'https://figcraft.example/mcp', headers: { Authorization: 'example' } }, figcraft), 'conflict');
+  assert.equal(classifyEntry({ command: 'node', args: shiori.args }, shiori), 'stale');
+  assert.equal(classifyEntry({ command: 'node', args: shiori.args, env: { [ARCHIVE_ENV]: ARCHIVE_URL } }, shiori), 'match');
 });
 
 test('selectServersForInstall skips Craft CLIs that are not on PATH', async () => {
@@ -247,6 +320,7 @@ test('runMcpCli install writes cursor JSON atomically with a backup and does not
   assert.deepEqual(config.mcpServers.handwritten, { command: 'keep-me', args: ['ok'] });
   assert.equal(config.mcpServers['shiori-brain'].command, 'node');
   assert.equal(config.mcpServers['shiori-brain'].args[0], shioriFor(home).args[0]);
+  assert.equal(config.mcpServers['shiori-brain'].env[ARCHIVE_ENV], ARCHIVE_URL);
   assert.deepEqual(config.mcpServers.figcraft, { command: 'figcraft-cli', args: ['mcp'] });
   assert.equal(config.mcpServers.cadcraft, undefined);
   assert.equal(await readFile(join(home, '.cursor/mcp.json.bak'), 'utf8'), original);
@@ -307,20 +381,73 @@ test('runMcpCli verify reports missing, ok, and conflict without writing', async
     }
   }, null, 2)}\n`);
   const before = await readFile(join(home, '.cursor/mcp.json'), 'utf8');
-  const { reports } = runMcpCli(['verify', '--home', home, '--host', 'cursor'], { env: { ...process.env, PATH: '/missing-bin' } });
+  const { reports } = runMcpCli(['verify', '--home', home, '--host', 'cursor'], { env: withArchive({ ...process.env, PATH: '/missing-bin' }) });
   assert.equal(await readFile(join(home, '.cursor/mcp.json'), 'utf8'), before);
   assert.ok(reports.some(item => item.name === 'shiori-brain' && item.status === 'missing'));
 });
 
-test('parseCliMcpEntry accepts JSON, text, and url-only host CLI output', () => {
-  assert.deepEqual(parseCliMcpEntry(JSON.stringify({ command: 'node', args: ['/tmp/index.js'] })), {
+test('githubPagesUrl derives the published Pages origin', () => {
+  assert.equal(githubPagesUrl('example/project'), 'https://example.github.io/project/');
+  assert.equal(githubPagesUrl('Dragonshorn-Studios/shiori-brain'), 'https://dragonshorn-studios.github.io/shiori-brain/');
+  assert.equal(githubPagesUrl('Acme/acme.github.io'), 'https://acme.github.io/');
+  assert.equal(githubPagesUrl(''), '');
+});
+
+test('parseCliMcpEntry reads Claude labeled get and Codex transport JSON', () => {
+  const claudeFound = `shiori-brain:
+  Scope: User config (available in all your projects)
+  Status: ✓ Connected
+  Type: stdio
+  Command: node
+  Args: /tmp/packages/shiori-brain-mcp/src/index.js
+  Environment:
+    SHIORI_BRAIN_BASE_URL: https://example.github.io/project/
+To remove this server, run: claude mcp remove "shiori-brain" -s user
+`;
+  assert.deepEqual(parseCliMcpEntry(claudeFound), {
+    type: 'stdio',
     command: 'node',
-    args: ['/tmp/index.js']
+    args: ['/tmp/packages/shiori-brain-mcp/src/index.js'],
+    env: { [ARCHIVE_ENV]: ARCHIVE_URL }
   });
-  assert.deepEqual(parseCliMcpEntry('url: https://figcraft.example/mcp\n'), { url: 'https://figcraft.example/mcp' });
-  assert.deepEqual(parseCliMcpEntry('command: figcraft-cli\nargs: ["mcp"]\n'), {
-    command: 'figcraft-cli',
-    args: ['mcp']
+  assert.deepEqual(parseCliMcpEntry(`figcraft:
+  Scope: User config (available in all your projects)
+  Status: ✓ Connected
+  Type: http
+  URL: https://figcraft.example/mcp
+`), {
+    type: 'http',
+    url: 'https://figcraft.example/mcp'
+  });
+  assert.deepEqual(parseCliMcpEntry(JSON.stringify({
+    name: 'shiori-brain',
+    enabled: true,
+    transport: {
+      type: 'stdio',
+      command: 'node',
+      args: ['/tmp/packages/shiori-brain-mcp/src/index.js'],
+      env: { [ARCHIVE_ENV]: ARCHIVE_URL },
+      cwd: null
+    }
+  }, null, 2)), {
+    command: 'node',
+    args: ['/tmp/packages/shiori-brain-mcp/src/index.js'],
+    url: undefined,
+    type: 'stdio',
+    env: { [ARCHIVE_ENV]: ARCHIVE_URL },
+    headers: undefined
+  });
+  assert.deepEqual(parseCliMcpEntry(JSON.stringify({
+    name: 'figcraft',
+    enabled: true,
+    transport: { type: 'streamable_http', url: 'https://figcraft.example/mcp', http_headers: null }
+  })), {
+    command: undefined,
+    args: undefined,
+    url: 'https://figcraft.example/mcp',
+    type: 'streamable_http',
+    env: undefined,
+    headers: undefined
   });
 });
 
@@ -339,6 +466,7 @@ test('Claude CLI install adds stdio servers and leaves HTTP entries as conflicts
   assert.equal(store.figcraft.command, undefined);
   assert.equal(store['shiori-brain'].command, 'node');
   assert.equal(store['shiori-brain'].args[0], shioriFor(home).args[0]);
+  assert.equal(store['shiori-brain'].env[ARCHIVE_ENV], ARCHIVE_URL);
   assert.ok(reports.some(item => item.name === 'figcraft' && item.status === 'conflict'));
   assert.ok(reports.some(item => item.name === 'shiori-brain' && item.status === 'added'));
   assert.match(await readFile(join(home, '.claude/CLAUDE.md'), 'utf8'), /<!-- shiori:start -->/);
@@ -358,6 +486,7 @@ test('Codex CLI install leaves url-only entries untouched and does not write exe
   });
   assert.deepEqual(store.figcraft, { url: 'https://figcraft.example/mcp' });
   assert.equal(store['shiori-brain'].command, 'node');
+  assert.equal(store['shiori-brain'].env[ARCHIVE_ENV], ARCHIVE_URL);
   assert.ok(reports.some(item => item.name === 'figcraft' && item.status === 'conflict'));
   assert.match(await readFile(join(home, '.codex/AGENTS.md'), 'utf8'), /Consult shiori-brain on demand/);
   assert.equal(existsSync(join(home, '.codex/rules')), false);
@@ -370,18 +499,22 @@ test('Claude and Codex CLI paths update stale Shiori-owned entries through remov
     'shiori-brain': { command: 'node', args: ['/old/packages/shiori-brain-mcp/src/index.js'] }
   };
   const { reports } = runMcpCli(['install', '--home', home, '--host', 'codex'], {
-    env: { ...process.env, PATH: '/missing-bin' },
+    env: withArchive({ ...process.env, PATH: '/missing-bin' }),
     execFile: fakeHostExec(store)
   });
-  assert.deepEqual(store['shiori-brain'], { command: 'node', args: shioriFor(home).args });
+  assert.deepEqual(store['shiori-brain'], { command: 'node', args: shioriFor(home).args, env: { [ARCHIVE_ENV]: ARCHIVE_URL } });
   assert.ok(reports.some(item => item.name === 'shiori-brain' && item.status === 'updated'));
 });
 
-test('cliGetIsNotFound accepts only clear missing-server messages', () => {
-  assert.equal(cliGetIsNotFound({ stderr: 'Unknown MCP server: figcraft' }), true);
-  assert.equal(cliGetIsNotFound({ stdout: 'No MCP server named shiori-brain' }), true);
+test('cliGetIsNotFound accepts only Claude and Codex missing-server messages', () => {
+  assert.equal(cliGetIsNotFound({ stderr: 'No MCP server found with name: "shiori-brain". Configured servers:' }), true);
+  assert.equal(cliGetIsNotFound({ stdout: 'No MCP server found with name: "shiori-brain"' }), true);
+  assert.equal(cliGetIsNotFound({ stderr: "No MCP server named 'shiori-brain' found." }), true);
+  assert.equal(cliGetIsNotFound({ stdout: 'No MCP servers configured. Use `claude mcp add` to add a server.' }), true);
+  assert.equal(cliGetIsNotFound({ stderr: 'Unknown MCP server: figcraft' }), false);
   assert.equal(cliGetIsNotFound({ stderr: 'failed to connect to Anthropic API' }), false);
   assert.equal(cliGetIsNotFound({ stderr: 'claude: command not found' }), false);
+  assert.equal(cliGetIsNotFound({ stderr: 'unable to parse mcp get output' }), false);
 });
 
 test('Claude and Codex CLI not-found lookups add the missing Shiori server', async () => {
@@ -389,7 +522,7 @@ test('Claude and Codex CLI not-found lookups add the missing Shiori server', asy
     const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
     const store = {};
     const { reports } = runMcpCli(['install', '--home', home, '--host', host], {
-      env: { ...process.env, PATH: '/missing-bin' },
+      env: withArchive({ ...process.env, PATH: '/missing-bin' }),
       execFile: fakeHostExec(store)
     });
     assert.ok(reports.some(item => item.name === 'shiori-brain' && item.status === 'added'), host);
@@ -402,7 +535,7 @@ test('Claude and Codex CLI get failures other than not-found are errors and do n
     const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
     const store = {};
     const { reports } = runMcpCli(['install', '--home', home, '--host', host], {
-      env: { ...process.env, PATH: '/missing-bin' },
+      env: withArchive({ ...process.env, PATH: '/missing-bin' }),
       execFile: fakeHostExec(store, { getFailures: { 'shiori-brain': 'failed to connect to host MCP API' } })
     });
     assert.ok(reports.some(item => item.name === 'shiori-brain' && item.status === 'error'), host);
@@ -437,8 +570,61 @@ test('MCP helper CLI runs from a temp .mjs path', async () => {
   const helper = join(await mkdtemp(join(tmpdir(), 'shiori-helper-')), 'shiori-mcp-temp.mjs');
   await writeFile(helper, await readFile(new URL('../src/mcp-config.js', import.meta.url)));
   await mkdir(join(home, '.cursor'), { recursive: true });
-  const stdout = execFileSync(process.execPath, [helper, 'verify', '--home', home, '--host', 'cursor'], { encoding: 'utf8' });
+  const stdout = execFileSync(process.execPath, [helper, 'verify', '--home', home, '--host', 'cursor', '--base-url', ARCHIVE_URL], { encoding: 'utf8' });
   assert.match(stdout, /shiori-brain missing/);
+});
+
+test('runMcpCli refuses to install without a Pages archive origin', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const env = { ...process.env, PATH: '/missing-bin' };
+  delete env[ARCHIVE_ENV];
+  assert.throws(
+    () => runMcpCli(['install', '--home', home, '--host', 'cursor'], { env }),
+    /will not fall back to another project's archive/
+  );
+});
+
+test('writeJsonAtomic preserves the existing Cursor config mode', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const path = join(home, '.cursor/mcp.json');
+  await mkdir(join(home, '.cursor'), { recursive: true });
+  await writeFile(path, `${JSON.stringify({ mcpServers: {} }, null, 2)}\n`);
+  chmodSync(path, 0o600);
+  runMcpCli(['install', '--home', home, '--host', 'cursor'], { env: withArchive({ ...process.env, PATH: '/missing-bin' }) });
+  assert.equal(statSync(path).mode & 0o777, 0o600);
+});
+
+test('Claude mcp get not-found on stdout still adds, and other parse failures do not', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const store = {};
+  const execFile = (command, args = [], opts = {}) => {
+    if (command !== 'claude') return execFileSync(command, args, opts);
+    const [topic, action, ...rest] = args;
+    if (topic === 'mcp' && action === 'get') {
+      return `No MCP server found with name: "${rest[0]}". Configured servers:\n`;
+    }
+    return fakeHostExec(store)(command, args, opts);
+  };
+  const { reports } = runMcpCli(['install', '--home', home, '--host', 'claude'], {
+    env: withArchive({ ...process.env, PATH: '/missing-bin' }),
+    execFile
+  });
+  assert.ok(reports.some(item => item.name === 'shiori-brain' && item.status === 'added'));
+  assert.equal(store['shiori-brain'].command, 'node');
+
+  const opaque = {};
+  const opaqueExec = (command, args = [], opts = {}) => {
+    if (command !== 'claude') return execFileSync(command, args, opts);
+    const [topic, action] = args;
+    if (topic === 'mcp' && action === 'get') return 'unexpected claude diagnostic without an entry\n';
+    return fakeHostExec(opaque)(command, args, opts);
+  };
+  const failed = runMcpCli(['install', '--home', home, '--host', 'claude'], {
+    env: withArchive({ ...process.env, PATH: '/missing-bin' }),
+    execFile: opaqueExec
+  });
+  assert.ok(failed.reports.some(item => item.name === 'shiori-brain' && item.status === 'error'));
+  assert.equal(opaque['shiori-brain'], undefined);
 });
 
 test('generated doctor --install cursor writes MCP config using the shared helper', async () => {
@@ -458,6 +644,7 @@ test('generated doctor --install cursor writes MCP config using the shared helpe
   const config = JSON.parse(await readFile(join(home, '.cursor/mcp.json'), 'utf8'));
   assert.equal(config.mcpServers['shiori-brain'].command, 'node');
   assert.equal(config.mcpServers['shiori-brain'].args[0], join(repositoryRoot, 'packages/shiori-brain-mcp/src/index.js'));
+  assert.equal(config.mcpServers['shiori-brain'].env[ARCHIVE_ENV], 'https://example.github.io/project/');
   assert.deepEqual(config.mcpServers.figcraft.args, ['mcp']);
   assert.equal(config.mcpServers.cadcraft, undefined);
   assert.equal(existsSync(join(home, '.cursor/rules')), false);

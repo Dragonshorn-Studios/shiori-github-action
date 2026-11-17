@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderMcpMarkdownTable } from './mcp-config.js';
+import { githubPagesUrl, renderMcpMarkdownTable } from './mcp-config.js';
 
 const DEFAULT_REPOSITORY = 'Dragonshorn-Studios/shiori-brain';
 
@@ -22,16 +22,17 @@ function mcpPackageFiles() {
 export function installSupportFiles(config) {
   const repository = config.repository || DEFAULT_REPOSITORY;
   const marketplace = config.marketplaceName || 'shiori-knowledge';
+  const archiveUrl = githubPagesUrl(repository);
   return new Map([
-    ['AGENT-SETUP.md', renderGuide(repository, marketplace)],
-    ['scripts/shiori-doctor.sh', renderShellDoctor(repository, marketplace)],
-    ['scripts/shiori-doctor.ps1', renderPowerShellDoctor(repository, marketplace)],
+    ['AGENT-SETUP.md', renderGuide(repository, marketplace, archiveUrl)],
+    ['scripts/shiori-doctor.sh', renderShellDoctor(repository, marketplace, archiveUrl)],
+    ['scripts/shiori-doctor.ps1', renderPowerShellDoctor(repository, marketplace, archiveUrl)],
     ['scripts/shiori-mcp.mjs', mcpHelperSource()],
     ...mcpPackageFiles()
   ]);
 }
 
-function renderGuide(repository, marketplace) {
+function renderGuide(repository, marketplace, archiveUrl) {
   const rawBase = `https://raw.githubusercontent.com/${repository}/main`;
   return `# Install Shiori for coding agents
 
@@ -101,7 +102,7 @@ Pass names after \`--update\`, or use PowerShell \`-Update -UpdateTargets openco
 
 ## MCP servers
 
-The doctor can add a local stdio MCP client for the published Pages archive, plus Storytold Craft CLIs that are already on \`PATH\`. Default doctor mode is still read-only. MCP writes happen only under \`--install\` / \`--update\`: Cursor via \`~/.cursor/mcp.json\`, Claude Code via \`claude mcp add -s user\`, and Codex via \`codex mcp add\`. The shiori-brain server is \`node <checkout>/packages/shiori-brain-mcp/src/index.js\` from the managed checkout; it is not loaded from a package registry. Existing non-Shiori MCP entries are never overwritten.
+The doctor can add a local stdio MCP client for the published Pages archive, plus Storytold Craft CLIs that are already on \`PATH\`. Default doctor mode is still read-only and does not launch Claude or Codex. MCP writes happen only under \`--install\` / \`--update\`: Cursor via \`~/.cursor/mcp.json\`, Claude Code via \`claude mcp add -s user\`, and Codex via \`codex mcp add\`. The shiori-brain server is \`node <checkout>/packages/shiori-brain-mcp/src/index.js\` from the managed checkout; it is not loaded from a package registry. Installed entries set \`SHIORI_BRAIN_BASE_URL\` to this project's Pages origin (\`${archiveUrl || 'https://<owner>.github.io/<repo>/'}\`). Override with \`SHIORI_BRAIN_BASE_URL\` if Pages uses a custom domain. The installer fails instead of using another project's archive when that URL cannot be determined. Existing non-Shiori MCP entries are never overwritten.
 
 ${renderMcpMarkdownTable()}
 Consult shiori-brain on demand (\`search\` / \`read_doc\`) before architecture or security decisions; do not dump that knowledge into context. Skills are procedures only.
@@ -119,12 +120,13 @@ AFFiNE remains canonical. Do not edit generated skills, manifests, this guide, o
 `;
 }
 
-function renderShellDoctor(repository, marketplace) {
+function renderShellDoctor(repository, marketplace, archiveUrl) {
   return `#!/usr/bin/env sh
 set -eu
 
 repository=\"\${SHIORI_REPOSITORY:-${repository}}\"
 marketplace=\"\${SHIORI_MARKETPLACE:-${marketplace}}\"
+default_archive_url='${archiveUrl}'
 guide_url=\"https://github.com/$repository/blob/main/AGENT-SETUP.md\"
 checkout=\"\${SHIORI_CHECKOUT:-$HOME/.local/share/shiori/shiori-brain}\"
 state_root=\"\${SHIORI_STATE_HOME:-$HOME/.local/state/shiori}\"
@@ -163,10 +165,26 @@ resolve_mcp_helper() {
   curl -fsSL \"https://raw.githubusercontent.com/$repository/main/scripts/shiori-mcp.mjs\" > \"$mcp_helper_tmp\" || return 1
   printf '%s\\n' \"$mcp_helper_tmp\"
 }
+archive_url() {
+  if [ -n \"\${SHIORI_BRAIN_BASE_URL:-}\" ]; then
+    printf '%s\\n' \"$SHIORI_BRAIN_BASE_URL\"
+    return 0
+  fi
+  if [ -n \"$default_archive_url\" ]; then
+    printf '%s\\n' \"$default_archive_url\"
+    return 0
+  fi
+  owner=\${repository%%/*}
+  repo=\${repository#*/}
+  [ -n \"$owner\" ] && [ -n \"$repo\" ] && [ \"$repository\" != \"$owner\" ] || return 1
+  printf 'https://%s.github.io/%s/\\n' \"$owner\" \"$repo\" | tr '[:upper:]' '[:lower:]'
+}
 run_mcp_cli() {
   has_command node || { printf '%s\\n' 'Skipping MCP config: node is not available.'; return 0; }
   helper=$(resolve_mcp_helper) || return 1
-  node \"$helper\" \"$@\" --home \"$HOME\" --checkout \"$checkout\"
+  pages_origin=$(archive_url) || pages_origin=''
+  [ -n \"$pages_origin\" ] || { printf '%s\\n' 'Set SHIORI_BRAIN_BASE_URL to the published Pages origin before installing MCP servers. The installer will not fall back to another project archive.' >&2; return 1; }
+  node \"$helper\" \"$@\" --home \"$HOME\" --checkout \"$checkout\" --base-url \"$pages_origin\"
 }
 contains_text() {
   case $1 in
@@ -383,8 +401,7 @@ row 'Windsurf' windsurf '.windsurf' local windsurf
 row 'Vibe' vibe '.vibe' local vibe
 row 'Devin' devin '.devin' cloud devin
 
-printf '%s\\n' '' 'MCP servers'
-run_mcp_cli verify || true
+printf '%s\\n' '' 'MCP servers' '  Installed under --install / --update. A read-only run does not launch host CLIs.'
 
 printf '%s\\n' \\
   '' \\
@@ -437,7 +454,7 @@ fi
 `;
 }
 
-function renderPowerShellDoctor(repository, marketplace) {
+function renderPowerShellDoctor(repository, marketplace, archiveUrl) {
   return `# Generated by Shiori. Safe to run from a checkout or through irm | iex.
 [CmdletBinding()]
 param(
@@ -448,6 +465,7 @@ param(
 
 $Repository = if ($env:SHIORI_REPOSITORY) { $env:SHIORI_REPOSITORY } else { '${repository}' }
 $Marketplace = if ($env:SHIORI_MARKETPLACE) { $env:SHIORI_MARKETPLACE } else { '${marketplace}' }
+$DefaultArchiveUrl = '${archiveUrl}'
 $GuideUrl = "https://github.com/$Repository/blob/main/AGENT-SETUP.md"
 $ManagedCheckout = if ($env:SHIORI_CHECKOUT) { $env:SHIORI_CHECKOUT } else { Join-Path $HOME '.local/share/shiori/shiori-brain' }
 $StateRoot = if ($env:SHIORI_STATE_HOME) { $env:SHIORI_STATE_HOME } else { Join-Path $HOME '.local/state/shiori' }
@@ -467,14 +485,27 @@ function Get-McpHelper {
     return $script:McpHelperTemp
 }
 
+function Get-ShioriArchiveUrl {
+    if ($env:SHIORI_BRAIN_BASE_URL) { return $env:SHIORI_BRAIN_BASE_URL }
+    if ($DefaultArchiveUrl) { return $DefaultArchiveUrl }
+    $Parts = @($Repository -split '/', 2)
+    if ($Parts.Count -ne 2 -or -not $Parts[0] -or -not $Parts[1]) { return '' }
+    $Owner = $Parts[0].ToLowerInvariant()
+    $Repo = $Parts[1]
+    if ($Repo.ToLowerInvariant() -eq ($Owner + '.github.io')) { return \"https://$Owner.github.io/\" }
+    return \"https://$Owner.github.io/$Repo/\"
+}
+
 function Invoke-McpCli {
     param([string[]]$McpArgs)
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
         Write-Host 'Skipping MCP config: node is not available.'
         return
     }
+    $ArchiveUrl = Get-ShioriArchiveUrl
+    if (-not $ArchiveUrl) { throw 'Set SHIORI_BRAIN_BASE_URL to the published Pages origin before installing MCP servers. The installer will not fall back to another project''s archive.' }
     $Helper = Get-McpHelper
-    & node $Helper @McpArgs --home $HOME --checkout $ManagedCheckout
+    & node $Helper @McpArgs --home $HOME --checkout $ManagedCheckout --base-url $ArchiveUrl
     if ($LASTEXITCODE -ne 0) { throw \"Shiori MCP helper failed with exit code $LASTEXITCODE\" }
 }
 
@@ -712,7 +743,7 @@ Show-AgentStatus 'Devin' devin '.devin' devin -Cloud
 
 Write-Host ''
 Write-Host 'MCP servers'
-try { Invoke-McpCli -McpArgs @('verify') } catch { Write-Host 'Skipping MCP verification.' }
+Write-Host '  Installed under -Install / -Update. A read-only run does not launch host CLIs.'
 
 Write-Host @"
 

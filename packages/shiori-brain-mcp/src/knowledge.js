@@ -1,8 +1,9 @@
-export const DEFAULT_BASE_URL = 'https://dragonshorn-studios.github.io/shiori-brain/';
 export const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
+const MISSING_ARCHIVE = 'Pass --base-url or set SHIORI_BRAIN_BASE_URL to the published Pages origin. The server will not fall back to another project\'s archive.';
 
 export function normalizeBaseUrl(value) {
-  const url = new URL(value || DEFAULT_BASE_URL);
+  if (value == null || String(value).trim() === '') throw new Error(MISSING_ARCHIVE);
+  const url = new URL(value);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error('SHIORI_BRAIN_BASE_URL must be an http(s) URL.');
   }
@@ -96,7 +97,7 @@ export function searchDocuments(documents, query) {
 }
 
 export function createKnowledgeClient({
-  baseUrl = DEFAULT_BASE_URL,
+  baseUrl,
   fetchImpl = fetch,
   cache = new Map(),
   fetchTimeoutMs = DEFAULT_FETCH_TIMEOUT_MS
