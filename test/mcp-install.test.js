@@ -11,6 +11,7 @@ import {
   applyInstructionFile,
   applyJsonMcpConfig,
   classifyEntry,
+  cliGetIsNotFound,
   mcpServerCatalog,
   parseCliMcpEntry,
   renderMcpDataYaml,
@@ -56,7 +57,7 @@ function positionalName(tokens) {
   return names[0];
 }
 
-function fakeHostExec(store) {
+function fakeHostExec(store, { getFailures = {} } = {}) {
   return (command, args = [], opts = {}) => {
     if (command !== 'claude' && command !== 'codex') return execFileSync(command, args, opts);
     const [topic, action, ...rest] = args;
@@ -68,6 +69,13 @@ function fakeHostExec(store) {
     if (action === 'get') {
       const json = rest.includes('--json');
       const name = rest.find(item => item !== '--json');
+      if (getFailures[name]) {
+        const error = new Error(getFailures[name]);
+        error.status = 2;
+        error.stdout = '';
+        error.stderr = getFailures[name];
+        throw error;
+      }
       const entry = store[name];
       if (!entry) {
         const error = new Error(`Unknown MCP server: ${name}`);
@@ -367,6 +375,40 @@ test('Claude and Codex CLI paths update stale Shiori-owned entries through remov
   });
   assert.deepEqual(store['shiori-brain'], { command: 'node', args: shioriFor(home).args });
   assert.ok(reports.some(item => item.name === 'shiori-brain' && item.status === 'updated'));
+});
+
+test('cliGetIsNotFound accepts only clear missing-server messages', () => {
+  assert.equal(cliGetIsNotFound({ stderr: 'Unknown MCP server: figcraft' }), true);
+  assert.equal(cliGetIsNotFound({ stdout: 'No MCP server named shiori-brain' }), true);
+  assert.equal(cliGetIsNotFound({ stderr: 'failed to connect to Anthropic API' }), false);
+  assert.equal(cliGetIsNotFound({ stderr: 'claude: command not found' }), false);
+});
+
+test('Claude and Codex CLI not-found lookups add the missing Shiori server', async () => {
+  for (const host of ['claude', 'codex']) {
+    const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+    const store = {};
+    const { reports } = runMcpCli(['install', '--home', home, '--host', host], {
+      env: { ...process.env, PATH: '/missing-bin' },
+      execFile: fakeHostExec(store)
+    });
+    assert.ok(reports.some(item => item.name === 'shiori-brain' && item.status === 'added'), host);
+    assert.equal(store['shiori-brain'].command, 'node', host);
+  }
+});
+
+test('Claude and Codex CLI get failures other than not-found are errors and do not add', async () => {
+  for (const host of ['claude', 'codex']) {
+    const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+    const store = {};
+    const { reports } = runMcpCli(['install', '--home', home, '--host', host], {
+      env: { ...process.env, PATH: '/missing-bin' },
+      execFile: fakeHostExec(store, { getFailures: { 'shiori-brain': 'failed to connect to host MCP API' } })
+    });
+    assert.ok(reports.some(item => item.name === 'shiori-brain' && item.status === 'error'), host);
+    assert.ok(reports.some(item => item.name === 'shiori-brain' && /unable to read shiori-brain/.test(item.message ?? '')), host);
+    assert.equal(store['shiori-brain'], undefined, host);
+  }
 });
 
 test('instruction files skip foreign content and only update a marked Shiori block', async () => {

@@ -300,6 +300,8 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(shellDoctor, /run_mcp_cli verify/);
   assert.match(shellDoctor, /--checkout \"\$checkout\"/);
   assert.match(shellDoctor, /packages\/shiori-brain-mcp\/src\/index.js/);
+  assert.match(shellDoctor, /mktemp -d/);
+  assert.doesNotMatch(shellDoctor, /shiori-mcp-\$\$/);
   const powerShellDoctor = await readFile(join(repositoryRoot, 'scripts/shiori-doctor.ps1'), 'utf8');
   assert.match(powerShellDoctor, /Get-Command/);
   assert.match(powerShellDoctor, /'remote'/);

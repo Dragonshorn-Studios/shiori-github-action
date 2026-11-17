@@ -1,4 +1,5 @@
 export const DEFAULT_BASE_URL = 'https://dragonshorn-studios.github.io/shiori-brain/';
+export const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
 
 export function normalizeBaseUrl(value) {
   const url = new URL(value || DEFAULT_BASE_URL);
@@ -23,10 +24,23 @@ export function resolveDocUrl(baseUrl, entry) {
   return resolved;
 }
 
-async function fetchText(url, { fetchImpl, cache }) {
+function isTimeoutError(error) {
+  return error?.name === 'TimeoutError' || error?.name === 'AbortError';
+}
+
+async function fetchText(url, { fetchImpl, cache, fetchTimeoutMs }) {
   const key = url.href;
   if (cache.has(key)) return cache.get(key);
-  const response = await fetchImpl(url);
+  const signal = AbortSignal.timeout(fetchTimeoutMs);
+  let response;
+  try {
+    response = await fetchImpl(url, { signal });
+  } catch (error) {
+    if (isTimeoutError(error) || signal.aborted) {
+      throw new Error(`Timed out fetching ${url.href} after ${fetchTimeoutMs}ms.`);
+    }
+    throw error;
+  }
   if (!response.ok) throw new Error(`Unable to fetch ${url.href} (${response.status}).`);
   const text = await response.text();
   cache.set(key, text);
@@ -81,13 +95,18 @@ export function searchDocuments(documents, query) {
     .map(item => item.document);
 }
 
-export function createKnowledgeClient({ baseUrl = DEFAULT_BASE_URL, fetchImpl = fetch, cache = new Map() } = {}) {
+export function createKnowledgeClient({
+  baseUrl = DEFAULT_BASE_URL,
+  fetchImpl = fetch,
+  cache = new Map(),
+  fetchTimeoutMs = DEFAULT_FETCH_TIMEOUT_MS
+} = {}) {
   const resolvedBase = normalizeBaseUrl(baseUrl);
   let documentsPromise;
 
   async function loadIndex() {
     if (!documentsPromise) {
-      documentsPromise = fetchText(resolveIndexUrl(resolvedBase), { fetchImpl, cache })
+      documentsPromise = fetchText(resolveIndexUrl(resolvedBase), { fetchImpl, cache, fetchTimeoutMs })
         .then(text => normalizeDocuments(JSON.parse(text)))
         .catch(error => {
           documentsPromise = undefined;
@@ -106,7 +125,7 @@ export function createKnowledgeClient({ baseUrl = DEFAULT_BASE_URL, fetchImpl = 
       const documents = await loadIndex();
       const entry = documents.find(document => document.id === id);
       if (!entry) throw new Error(`Unknown document id: ${id}`);
-      const markdown = await fetchText(resolveDocUrl(resolvedBase, entry), { fetchImpl, cache });
+      const markdown = await fetchText(resolveDocUrl(resolvedBase, entry), { fetchImpl, cache, fetchTimeoutMs });
       return { ...entry, markdown };
     }
   };

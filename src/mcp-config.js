@@ -365,12 +365,25 @@ function runHostCli(bin, args, env, execFile) {
   }
 }
 
+export function cliGetIsNotFound(result) {
+  const text = `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`;
+  if (/command not found|enoent|not recognized as an internal/i.test(text)) return false;
+  return /unknown mcp server|no mcp server|mcp server .* not found|not found: .*mcp|server not found|no such mcp|mcp .* does not exist/i.test(text);
+}
+
 function getCliEntry(host, name, env, execFile) {
+  const bin = host.kind === 'claude-cli' ? 'claude' : 'codex';
   const result = host.kind === 'claude-cli'
-    ? runHostCli('claude', ['mcp', 'get', name], env, execFile)
-    : runHostCli('codex', ['mcp', 'get', name, '--json'], env, execFile);
-  if (!result.ok) return null;
-  return parseCliMcpEntry(result.stdout);
+    ? runHostCli(bin, ['mcp', 'get', name], env, execFile)
+    : runHostCli(bin, ['mcp', 'get', name, '--json'], env, execFile);
+  if (result.ok) {
+    const entry = parseCliMcpEntry(result.stdout);
+    if (entry) return { ok: true, entry };
+    return { ok: false, error: `unable to parse ${bin} mcp get output for ${name}` };
+  }
+  if (cliGetIsNotFound(result)) return { ok: true, entry: null };
+  const detail = String(result.stderr || result.stdout || `${bin} mcp get failed`).trim();
+  return { ok: false, error: `unable to read ${name} through ${bin} mcp get (${detail})` };
 }
 
 function addCliEntry(host, server, env, execFile) {
@@ -394,7 +407,12 @@ function removeCliEntry(host, name, env, execFile) {
 function applyCliMcpConfig(host, servers, env, execFile, { write }) {
   const reports = [];
   for (const server of servers) {
-    const existing = getCliEntry(host, server.name, env, execFile);
+    const lookup = getCliEntry(host, server.name, env, execFile);
+    if (!lookup.ok) {
+      reports.push({ name: server.name, status: 'error', message: lookup.error });
+      continue;
+    }
+    const existing = lookup.entry;
     const classification = classifyEntry(existing, server);
     if (classification === 'match') {
       if (!write) {

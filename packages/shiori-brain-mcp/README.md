@@ -13,6 +13,6 @@ Run it from the managed Shiori checkout (the doctor registers this path):
 node ~/.local/share/shiori/shiori-brain/packages/shiori-brain-mcp/src/index.js
 ```
 
-The archive origin defaults to `https://dragonshorn-studios.github.io/shiori-brain/` and can be set with `SHIORI_BRAIN_BASE_URL` or `--base-url`. The server caches fetches in memory, does not take secrets, and does not write.
+The archive origin defaults to `https://dragonshorn-studios.github.io/shiori-brain/` and can be set with `SHIORI_BRAIN_BASE_URL` or `--base-url`. The server caches fetches in memory, aborts hung fetches after 10s, does not take secrets, and does not write.
 
 This package is a consumer of the published snapshot. `AffineMcpSource` in the parent Action remains the generate-time AFFiNE client.

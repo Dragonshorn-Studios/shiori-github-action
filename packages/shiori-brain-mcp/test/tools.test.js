@@ -84,6 +84,37 @@ test('read_doc refuses unknown ids and off-origin URLs', async () => {
   await assert.rejects(() => poisoned.readDoc('leak'), /off-origin|outside the archive/);
 });
 
+test('fetch times out with a clear MCP error', async () => {
+  const hangingFetch = (_url, { signal } = {}) => new Promise((_, reject) => {
+    const keepAlive = setTimeout(() => {}, 1000);
+    const fail = reason => {
+      clearTimeout(keepAlive);
+      reject(reason);
+    };
+    if (!signal) {
+      fail(new Error('fetch is missing AbortSignal.timeout'));
+      return;
+    }
+    if (signal.aborted) {
+      fail(signal.reason);
+      return;
+    }
+    signal.addEventListener('abort', () => fail(signal.reason));
+  });
+  const knowledge = createKnowledgeClient({
+    baseUrl: 'https://example.test/shiori-brain/',
+    fetchImpl: hangingFetch,
+    fetchTimeoutMs: 20
+  });
+  await assert.rejects(() => knowledge.search('architecture'), /Timed out fetching https:\/\/example\.test\/shiori-brain\/index\.json after 20ms/);
+  const mcpError = await handleRequest(
+    { method: 'tools/call', params: { name: 'search', arguments: { query: 'architecture' } } },
+    knowledge
+  ).catch(error => error);
+  assert.equal(mcpError instanceof Error, true);
+  assert.match(mcpError.message, /Timed out fetching https:\/\/example\.test\/shiori-brain\/index\.json after 20ms/);
+});
+
 test('MCP search and read_doc tools wrap the knowledge client', async () => {
   const knowledge = client();
   const listed = await handleRequest({ method: 'tools/list' }, knowledge);

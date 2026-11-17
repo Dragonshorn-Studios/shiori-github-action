@@ -132,6 +132,7 @@ skills_root=\"\${SHIORI_SKILLS_HOME:-$HOME/.agents/skills}\"
 installed_hosts_file=\"$state_root/installed-hosts\"
 managed_skills_file=\"$state_root/managed-skills\"
 mcp_helper_tmp=''
+mcp_helper_dir=''
 if [ -d '.agents/skills' ] && [ -d 'plugins/shiori' ]; then
   context='checkout'
   project_hint='project adapters are ready in this checkout'
@@ -142,7 +143,10 @@ fi
 
 has_command() { command -v \"$1\" >/dev/null 2>&1; }
 has_home() { [ -e \"$HOME/$1\" ]; }
-cleanup_mcp_helper() { [ -z \"$mcp_helper_tmp\" ] || rm -f \"$mcp_helper_tmp\"; }
+cleanup_mcp_helper() {
+  [ -z \"$mcp_helper_tmp\" ] || rm -f \"$mcp_helper_tmp\"
+  [ -z \"$mcp_helper_dir\" ] || rm -rf \"$mcp_helper_dir\"
+}
 trap cleanup_mcp_helper EXIT
 resolve_mcp_helper() {
   if [ -n \"\${SHIORI_MCP_HELPER:-}\" ] && [ -f \"$SHIORI_MCP_HELPER\" ]; then
@@ -154,8 +158,9 @@ resolve_mcp_helper() {
     return 0
   fi
   has_command curl || { printf '%s\\n' 'Cannot load the Shiori MCP helper: curl is not available.' >&2; return 1; }
-  mcp_helper_tmp=\"\${TMPDIR:-/tmp}/shiori-mcp-$$.mjs\"
-  curl -fsSL \"https://raw.githubusercontent.com/$repository/main/scripts/shiori-mcp.mjs\" > \"$mcp_helper_tmp\"
+  mcp_helper_dir=$(mktemp -d) || return 1
+  mcp_helper_tmp=\"$mcp_helper_dir/shiori-mcp.mjs\"
+  curl -fsSL \"https://raw.githubusercontent.com/$repository/main/scripts/shiori-mcp.mjs\" > \"$mcp_helper_tmp\" || return 1
   printf '%s\\n' \"$mcp_helper_tmp\"
 }
 run_mcp_cli() {
