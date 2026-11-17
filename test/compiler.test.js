@@ -129,6 +129,12 @@ test('generates a dependency-free Pages shell and recursive navigation', async (
   const layout = await readFile(join(repositoryRoot, 'docs/_layouts/default.html'), 'utf8');
   const nav = await readFile(join(repositoryRoot, 'docs/_data/shiori-nav.yml'), 'utf8');
   const css = await readFile(join(repositoryRoot, 'docs/assets/css/shiori.css'), 'utf8');
+  const home = await readFile(join(repositoryRoot, 'docs/index.md'), 'utf8');
+  const mcp = await readFile(join(repositoryRoot, 'docs/_data/shiori-mcp.yml'), 'utf8');
+  const indexText = await readFile(join(repositoryRoot, 'docs/index.json'), 'utf8');
+  const index = JSON.parse(indexText);
+  const raw = await readFile(join(repositoryRoot, 'docs/raw/architecture-apis.md'), 'utf8');
+  const rawNested = await readFile(join(repositoryRoot, 'docs/raw/architecture-apis/use-git-for-history.md'), 'utf8');
   assert.match(layout, /include nav\.html/);
   assert.match(nav, /children:/);
   assert.match(nav, /Architecture & APIs/);
@@ -141,6 +147,30 @@ test('generates a dependency-free Pages shell and recursive navigation', async (
   assert.match(css, /--gold:/);
   assert.match(css, /--accent: #c288f7/);
   assert.match(css, /var\(--glow\)/);
+  assert.match(home, /site.data.shiori-mcp/);
+  assert.match(mcp, /name: "shiori-brain"/);
+  assert.match(mcp, /command: "figcraft-cli mcp"/);
+  assert.match(mcp, /when_installed: true/);
+  assert.equal(index.schemaVersion, 1);
+  assert.deepEqual(index.documents.map(item => item.id).sort(), ['architecture', 'decision-one', 'product', 'root']);
+  const architecture = index.documents.find(item => item.id === 'architecture');
+  assert.equal(architecture.url, 'raw/architecture-apis.md');
+  assert.ok(architecture.summary);
+  assert.deepEqual(architecture.tags, ['skill', 'agent']);
+  assert.doesNotMatch(JSON.stringify(index), /token/i);
+  assert.doesNotMatch(raw, /^---$/m);
+  assert.match(raw, /See \[Decision\]/);
+  assert.match(rawNested, /# Decision/);
+  await compile(new TaggedFixtureSource(), {
+    ...baseConfig,
+    repositoryRoot,
+    pages: true,
+    skillTag: 'skill',
+    agentTag: 'agent',
+    skillsDirectory: '.agents/skills',
+    pluginDirectory: 'plugins'
+  });
+  assert.equal(await readFile(join(repositoryRoot, 'docs/index.json'), 'utf8'), indexText);
 });
 
 test('pages nav lists each URL once, uses agent H1 titles, and keeps untagged children', async () => {
@@ -249,8 +279,10 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   const setupGuide = await readFile(join(repositoryRoot, 'AGENT-SETUP.md'), 'utf8');
   assert.match(setupGuide, /curl -fsSL/);
   assert.match(setupGuide, /irm .* \| iex/);
-  assert.match(setupGuide, /--install opencode mcode vibe codex claude/);
+  assert.match(setupGuide, /--install opencode mcode vibe codex claude cursor/);
   assert.match(setupGuide, /--update/);
+  assert.match(setupGuide, /figcraft-cli mcp/);
+  assert.match(setupGuide, /Consult shiori-brain on demand/);
   const shellDoctor = await readFile(join(repositoryRoot, 'scripts/shiori-doctor.sh'), 'utf8');
   assert.match(shellDoctor, /context='remote'/);
   assert.match(shellDoctor, /codex plugin add/);
@@ -260,6 +292,8 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(shellDoctor, /Shiori: %s/);
   assert.match(shellDoctor, /shared_skills_installed/);
   assert.match(shellDoctor, /host_is_recorded codex/);
+  assert.match(shellDoctor, /run_mcp_cli install --host cursor/);
+  assert.match(shellDoctor, /run_mcp_cli verify/);
   const powerShellDoctor = await readFile(join(repositoryRoot, 'scripts/shiori-doctor.ps1'), 'utf8');
   assert.match(powerShellDoctor, /Get-Command/);
   assert.match(powerShellDoctor, /'remote'/);
@@ -269,4 +303,7 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(powerShellDoctor, /Get-ShioriInstallStatus/);
   assert.match(powerShellDoctor, /Test-SharedSkillsInstalled/);
   assert.match(powerShellDoctor, /Test-RecordedHost codex/);
+  assert.match(powerShellDoctor, /Invoke-McpCli -McpArgs @\('install', '--host', 'cursor'\)/);
+  const helper = await readFile(join(repositoryRoot, 'scripts/shiori-mcp.js'), 'utf8');
+  assert.match(helper, /figcraft-cli/);
 });

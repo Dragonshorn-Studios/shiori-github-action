@@ -1,0 +1,126 @@
+export const DEFAULT_BASE_URL = 'https://dragonshorn-studios.github.io/shiori-brain/';
+
+export function normalizeBaseUrl(value) {
+  const url = new URL(value || DEFAULT_BASE_URL);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('SHIORI_BRAIN_BASE_URL must be an http(s) URL.');
+  }
+  url.hash = '';
+  url.search = '';
+  const href = url.href.endsWith('/') ? url.href : `${url.href}/`;
+  return new URL(href);
+}
+
+export function resolveIndexUrl(baseUrl) {
+  return new URL('index.json', baseUrl);
+}
+
+export function resolveDocUrl(baseUrl, entry) {
+  if (!entry?.url || typeof entry.url !== 'string') throw new Error('Index entry is missing a markdown URL.');
+  const resolved = new URL(entry.url, baseUrl);
+  if (resolved.origin !== baseUrl.origin) throw new Error(`Refusing to fetch off-origin document URL: ${resolved.href}`);
+  if (!resolved.pathname.startsWith(baseUrl.pathname)) throw new Error(`Refusing to fetch document URL outside the archive: ${resolved.href}`);
+  return resolved;
+}
+
+function cacheKey(kind, href) {
+  return `${kind}:${href}`;
+}
+
+async function fetchText(url, { fetchImpl, cache, kind }) {
+  const key = cacheKey(kind, url.href);
+  if (cache.has(key)) return cache.get(key);
+  const headers = { accept: kind === 'index' ? 'application/json, text/plain;q=0.9' : 'text/plain, text/markdown;q=0.9' };
+  const cachedMeta = cache.get(`${key}:meta`);
+  if (cachedMeta?.etag) headers['if-none-match'] = cachedMeta.etag;
+  if (cachedMeta?.lastModified) headers['if-modified-since'] = cachedMeta.lastModified;
+  const response = await fetchImpl(url, { headers });
+  if (response.status === 304 && cache.has(key)) return cache.get(key);
+  if (!response.ok) throw new Error(`Unable to fetch ${url.href} (${response.status}).`);
+  const text = await response.text();
+  cache.set(key, text);
+  cache.set(`${key}:meta`, {
+    etag: response.headers.get('etag') || undefined,
+    lastModified: response.headers.get('last-modified') || undefined
+  });
+  return text;
+}
+
+function normalizeDocuments(index) {
+  if (!index || typeof index !== 'object' || !Array.isArray(index.documents)) {
+    throw new Error('index.json must contain a documents array.');
+  }
+  return index.documents.map((entry, position) => {
+    if (!entry || typeof entry !== 'object') throw new Error(`Invalid index entry at ${position}.`);
+    if (!entry.id || !entry.title || !entry.url) throw new Error(`Index entry at ${position} is missing id, title, or url.`);
+    return {
+      id: String(entry.id),
+      title: String(entry.title),
+      summary: String(entry.summary ?? ''),
+      tags: Array.isArray(entry.tags) ? entry.tags.map(tag => String(tag)) : [],
+      url: String(entry.url)
+    };
+  });
+}
+
+function scoreDocument(document, tokens) {
+  if (!tokens.length) return 1;
+  const haystacks = [
+    [document.id, 4],
+    [document.title, 3],
+    [document.tags.join(' '), 2],
+    [document.summary, 1]
+  ];
+  let score = 0;
+  for (const token of tokens) {
+    let matched = false;
+    for (const [haystack, weight] of haystacks) {
+      if (haystack.toLowerCase().includes(token)) {
+        score += weight;
+        matched = true;
+      }
+    }
+    if (!matched) return 0;
+  }
+  return score;
+}
+
+export function searchDocuments(documents, query) {
+  const tokens = String(query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+  return documents
+    .map(document => ({ document, score: scoreDocument(document, tokens) }))
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.document.title.localeCompare(b.document.title) || a.document.id.localeCompare(b.document.id))
+    .map(item => item.document);
+}
+
+export function createKnowledgeClient({ baseUrl = DEFAULT_BASE_URL, fetchImpl = fetch, cache = new Map() } = {}) {
+  const resolvedBase = normalizeBaseUrl(baseUrl);
+  let documentsPromise;
+
+  async function loadIndex() {
+    if (!documentsPromise) {
+      documentsPromise = fetchText(resolveIndexUrl(resolvedBase), { fetchImpl, cache, kind: 'index' })
+        .then(text => normalizeDocuments(JSON.parse(text)))
+        .catch(error => {
+          documentsPromise = undefined;
+          throw error;
+        });
+    }
+    return documentsPromise;
+  }
+
+  return {
+    baseUrl: resolvedBase.href,
+    async search(query) {
+      return searchDocuments(await loadIndex(), query);
+    },
+    async readDoc(id) {
+      const documents = await loadIndex();
+      const entry = documents.find(document => document.id === id);
+      if (!entry) throw new Error(`Unknown document id: ${id}`);
+      const markdown = await fetchText(resolveDocUrl(resolvedBase, entry), { fetchImpl, cache, kind: 'doc' });
+      return { ...entry, markdown };
+    }
+  };
+}

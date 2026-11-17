@@ -1,4 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { renderMcpMarkdownTable } from './mcp-config.js';
+
 const DEFAULT_REPOSITORY = 'Dragonshorn-Studios/shiori-brain';
+
+export function mcpHelperSource() {
+  return readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'mcp-config.js'), 'utf8');
+}
 
 export function installSupportFiles(config) {
   const repository = config.repository || DEFAULT_REPOSITORY;
@@ -6,7 +15,8 @@ export function installSupportFiles(config) {
   return new Map([
     ['AGENT-SETUP.md', renderGuide(repository, marketplace)],
     ['scripts/shiori-doctor.sh', renderShellDoctor(repository, marketplace)],
-    ['scripts/shiori-doctor.ps1', renderPowerShellDoctor(repository, marketplace)]
+    ['scripts/shiori-doctor.ps1', renderPowerShellDoctor(repository, marketplace)],
+    ['scripts/shiori-mcp.js', mcpHelperSource()]
   ]);
 }
 
@@ -38,14 +48,14 @@ The doctor is read-only. It does not edit home-directory configuration or instal
 
 ## Install from the command line
 
-Only explicitly selected hosts are changed. OpenCode, MCode, and Vibe share one managed checkout at \`~/.local/share/shiori/shiori-brain\`; its skills are linked individually into the standard global \`~/.agents/skills\` directory. Codex and Claude Code use their plugin CLIs when the installed client version and account rollout expose them:
+Only explicitly selected hosts are changed. OpenCode, MCode, and Vibe share one managed checkout at \`~/.local/share/shiori/shiori-brain\`; its skills are linked individually into the standard global \`~/.agents/skills\` directory. Codex and Claude Code use their plugin CLIs when the installed client version and account rollout expose them. Cursor, Claude Code, and Codex also receive MCP config under \`--install\` / \`--update\`:
 
 \`\`\`bash
-curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | sh -s -- --install opencode mcode vibe codex claude
+curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | sh -s -- --install opencode mcode vibe codex claude cursor
 \`\`\`
 
 \`\`\`powershell
-$env:SHIORI_INSTALL='opencode,mcode,vibe,codex,claude'; irm ${rawBase}/scripts/shiori-doctor.ps1 | iex
+$env:SHIORI_INSTALL='opencode,mcode,vibe,codex,claude,cursor'; irm ${rawBase}/scripts/shiori-doctor.ps1 | iex
 \`\`\`
 
 For a checked-out script, use \`sh scripts/shiori-doctor.sh --install opencode mcode vibe\` or \`.\\scripts\\shiori-doctor.ps1 -Install opencode,mcode,vibe\`. Re-running install fast-forwards the managed checkout and reconciles skill links. Existing non-Shiori skill destinations are never overwritten.
@@ -72,17 +82,25 @@ Pass names after \`--update\`, or use PowerShell \`-Update -UpdateTargets openco
 | Codex / ChatGPT desktop | Repository skills work through \`.agents/skills\` | Run \`codex plugin marketplace add ${repository}\`, then open \`/plugins\` and install **Shiori**. |
 | Claude Code | Automatic through \`.claude/skills\` and \`.claude/agents\` | Run \`/plugin marketplace add ${repository}\`, then \`/plugin install shiori@${marketplace}\`. |
 | ZCode | Install the generated plugin | Open **Settings -> Plugins -> Create -> Add marketplace**, enter \`${repository}\`, then install **Shiori**. |
-| Cursor | Automatic through \`.cursor/skills\` | Open **Settings -> Plugins**, add \`https://github.com/${repository}\`, then install **Shiori**. |
+| Cursor | Automatic through \`.cursor/skills\` | Open **Settings -> Plugins**, add \`https://github.com/${repository}\`, then install **Shiori**. \`--install cursor\` writes MCP config only. |
 | MCode / MiniMax Code | Automatic through \`.agents/skills\` in this checkout | \`--install mcode\` uses the same managed checkout and global Agent Skills links. |
 | Windsurf | Automatic through \`.windsurf/skills\` | Keep the generated project adapter; no marketplace step is required. |
 | Vibe | Automatic through \`.vibe/skills\` | \`--install vibe\` uses the same managed checkout and global Agent Skills links. |
 | Devin | Automatic through committed \`.devin/skills\` in repository sessions | Devin may be cloud-only, so absence of a local executable is not an error. Connect this repository to the Devin workspace. |
+
+## MCP servers
+
+The doctor can add a local stdio MCP client for the published Pages archive, plus Storytold Craft CLIs that are already on \`PATH\`. Default doctor mode is still read-only. MCP writes happen only under \`--install\` / \`--update\` for Cursor (\`~/.cursor/mcp.json\`), Claude Code (\`~/.claude.json\`), and Codex (\`~/.codex/config.toml\`). Existing non-Shiori MCP entries are never overwritten.
+
+${renderMcpMarkdownTable()}
+Consult shiori-brain on demand (\`search\` / \`read_doc\`) before architecture or security decisions; do not dump that knowledge into context. Skills are procedures only.
 
 ## What gets generated
 
 - \`plugins/shiori/plugin.json\`: portable [Agent Plugins](https://agent-plugins.org/) manifest.
 - \`plugins/shiori/.codex-plugin/plugin.json\`: Codex compatibility manifest.
 - \`.agents/plugins/marketplace.json\`: native repository marketplace for Codex and ChatGPT desktop.
+- \`scripts/shiori-mcp.js\`: helper used by the doctor to add and verify MCP entries.
 - Host-specific project skill directories, all generated from the same AFFiNE documents.
 
 AFFiNE remains canonical. Do not edit generated skills, manifests, this guide, or the doctor scripts by hand; change Shiori and regenerate them.
@@ -101,6 +119,7 @@ state_root=\"\${SHIORI_STATE_HOME:-$HOME/.local/state/shiori}\"
 skills_root=\"\${SHIORI_SKILLS_HOME:-$HOME/.agents/skills}\"
 installed_hosts_file=\"$state_root/installed-hosts\"
 managed_skills_file=\"$state_root/managed-skills\"
+mcp_helper_tmp=''
 if [ -d '.agents/skills' ] && [ -d 'plugins/shiori' ]; then
   context='checkout'
   project_hint='project adapters are ready in this checkout'
@@ -111,6 +130,27 @@ fi
 
 has_command() { command -v \"$1\" >/dev/null 2>&1; }
 has_home() { [ -e \"$HOME/$1\" ]; }
+cleanup_mcp_helper() { [ -z \"$mcp_helper_tmp\" ] || rm -f \"$mcp_helper_tmp\"; }
+trap cleanup_mcp_helper EXIT
+resolve_mcp_helper() {
+  if [ -n \"\${SHIORI_MCP_HELPER:-}\" ] && [ -f \"$SHIORI_MCP_HELPER\" ]; then
+    printf '%s\\n' \"$SHIORI_MCP_HELPER\"
+    return 0
+  fi
+  if [ -f 'scripts/shiori-mcp.js' ]; then
+    printf '%s\\n' 'scripts/shiori-mcp.js'
+    return 0
+  fi
+  has_command curl || { printf '%s\\n' 'Cannot load the Shiori MCP helper: curl is not available.' >&2; return 1; }
+  mcp_helper_tmp=$(mktemp)
+  curl -fsSL \"https://raw.githubusercontent.com/$repository/main/scripts/shiori-mcp.js\" > \"$mcp_helper_tmp\"
+  printf '%s\\n' \"$mcp_helper_tmp\"
+}
+run_mcp_cli() {
+  has_command node || { printf '%s\\n' 'Skipping MCP config: node is not available.'; return 0; }
+  helper=$(resolve_mcp_helper) || return 1
+  node \"$helper\" \"$@\"
+}
 contains_text() {
   case $1 in
     *\"$2\"*) return 0 ;;
@@ -238,7 +278,7 @@ if [ \"$#\" -gt 0 ]; then
   selected_targets=\"$*\"
 fi
 if [ \"$operation\" = 'install' ] && [ -z \"$selected_targets\" ]; then
-  printf '%s\\n' 'Pass at least one installer: opencode, mcode, vibe, codex, or claude.' >&2
+  printf '%s\\n' 'Pass at least one installer: opencode, mcode, vibe, codex, claude, or cursor.' >&2
   exit 2
 fi
 if [ \"$operation\" = 'update' ] && [ -z \"$selected_targets\" ]; then
@@ -263,6 +303,9 @@ assert_installer() {
       else
         has_command claude && claude plugin marketplace add --help >/dev/null 2>&1 && claude plugin install --help >/dev/null 2>&1 || { printf '%s\\n' 'Cannot install Claude plugin: this CLI build or account does not expose plugin installation.' >&2; return 1; }
       fi
+      ;;
+    cursor)
+      has_command node || { printf '%s\\n' 'Cannot install Cursor MCP: node is not available.' >&2; return 1; }
       ;;
     *) printf 'No command-line installer is available for: %s\\n' \"$1\" >&2; return 1 ;;
   esac
@@ -323,14 +366,17 @@ row 'Windsurf' windsurf '.windsurf' local windsurf
 row 'Vibe' vibe '.vibe' local vibe
 row 'Devin' devin '.devin' cloud devin
 
+printf '%s\\n' '' 'MCP servers'
+run_mcp_cli verify || true
+
 printf '%s\\n' \\
   '' \\
   'Recommended native setup' \\
   '  OpenCode: select --install opencode to clone/update Shiori and link its skills through ~/.agents/skills.' \\
-  \"  Codex:    codex plugin marketplace add $repository ; then open /plugins and install Shiori.\" \\
-  \"  Claude:   /plugin marketplace add $repository ; then /plugin install shiori@$marketplace.\" \\
+  \"  Codex:    codex plugin marketplace add $repository ; then open /plugins and install Shiori. --install codex also writes MCP config.\" \\
+  \"  Claude:   /plugin marketplace add $repository ; then /plugin install shiori@$marketplace. --install claude also writes MCP config.\" \\
   \"  ZCode:    Settings -> Plugins -> Create -> Add marketplace -> $repository; install Shiori.\" \\
-  \"  Cursor:   Settings -> Plugins; add https://github.com/$repository; install Shiori.\" \\
+  \"  Cursor:   Settings -> Plugins; add https://github.com/$repository; install Shiori. --install cursor writes MCP config.\" \\
   '  MCode:    select --install mcode to use the same managed checkout and global Agent Skills links.' \\
   '  Vibe:     select --install vibe to use the same managed checkout and global Agent Skills links.' \\
   '  Devin:    connect this repository to the cloud workspace; no local executable is required.' \\
@@ -354,10 +400,11 @@ if [ -n \"$operation\" ]; then
   for selected_target in $selected_targets; do
     case \"$operation:$selected_target\" in
       install:opencode|install:mcode|install:vibe|update:opencode|update:mcode|update:vibe) record_host \"$selected_target\" ;;
-      install:codex) install_codex ;;
-      install:claude|install:claude-code) install_claude ;;
-      update:codex) update_codex ;;
-      update:claude|update:claude-code) update_claude ;;
+      install:codex) install_codex; run_mcp_cli install --host codex ;;
+      install:claude|install:claude-code) install_claude; run_mcp_cli install --host claude ;;
+      install:cursor|update:cursor) run_mcp_cli install --host cursor; record_host cursor ;;
+      update:codex) update_codex; run_mcp_cli install --host codex ;;
+      update:claude|update:claude-code) update_claude; run_mcp_cli install --host claude ;;
     esac
   done
   IFS=$previous_ifs
@@ -382,9 +429,29 @@ $StateRoot = if ($env:SHIORI_STATE_HOME) { $env:SHIORI_STATE_HOME } else { Join-
 $SkillsRoot = if ($env:SHIORI_SKILLS_HOME) { $env:SHIORI_SKILLS_HOME } else { Join-Path $HOME '.agents/skills' }
 $InstalledHostsFile = Join-Path $StateRoot 'installed-hosts'
 $ManagedSkillsFile = Join-Path $StateRoot 'managed-skills'
+$McpHelperTemp = $null
 $LocalCheckout = (Test-Path -LiteralPath '.agents\\skills') -and (Test-Path -LiteralPath 'plugins\\shiori')
 $Mode = if ($LocalCheckout) { 'checkout' } else { 'remote' }
 $ProjectHint = if ($LocalCheckout) { 'project adapters are ready in this checkout' } else { 'no Shiori checkout detected; use a marketplace installation below' }
+
+function Get-McpHelper {
+    if ($env:SHIORI_MCP_HELPER -and (Test-Path -LiteralPath $env:SHIORI_MCP_HELPER)) { return $env:SHIORI_MCP_HELPER }
+    if (Test-Path -LiteralPath 'scripts\\shiori-mcp.js') { return (Resolve-Path -LiteralPath 'scripts\\shiori-mcp.js').Path }
+    $script:McpHelperTemp = Join-Path ([IO.Path]::GetTempPath()) ('shiori-mcp-' + [guid]::NewGuid().ToString() + '.js')
+    Invoke-WebRequest -UseBasicParsing -Uri \"https://raw.githubusercontent.com/$Repository/main/scripts/shiori-mcp.js\" -OutFile $script:McpHelperTemp
+    return $script:McpHelperTemp
+}
+
+function Invoke-McpCli {
+    param([string[]]$McpArgs)
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        Write-Host 'Skipping MCP config: node is not available.'
+        return
+    }
+    $Helper = Get-McpHelper
+    & node $Helper @McpArgs
+    if ($LASTEXITCODE -ne 0) { throw \"Shiori MCP helper failed with exit code $LASTEXITCODE\" }
+}
 
 function Show-AgentStatus {
     param([string]$Name, [string]$Command, [string]$HomePath, [string]$Provider, [switch]$Cloud)
@@ -539,6 +606,9 @@ function Assert-PluginInstaller {
                 if ($LASTEXITCODE -ne 0) { throw 'Cannot install Claude plugin: this CLI build or account does not expose plugin installation.' }
             }
         }
+        'cursor' {
+            if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Cannot install Cursor MCP: node is not available.' }
+        }
         default { throw \"No command-line installer is available for: $Target\" }
     }
 }
@@ -615,14 +685,18 @@ Show-AgentStatus 'Windsurf' windsurf '.windsurf' windsurf
 Show-AgentStatus 'Vibe' vibe '.vibe' vibe
 Show-AgentStatus 'Devin' devin '.devin' devin -Cloud
 
+Write-Host ''
+Write-Host 'MCP servers'
+try { Invoke-McpCli -McpArgs @('verify') } catch { Write-Host 'Skipping MCP verification.' }
+
 Write-Host @"
 
 Recommended native setup
   OpenCode: select -Install opencode to clone/update Shiori and link its skills through ~/.agents/skills.
-  Codex:    codex plugin marketplace add $Repository ; then open /plugins and install Shiori.
-  Claude:   /plugin marketplace add $Repository ; then /plugin install shiori@$Marketplace.
+  Codex:    codex plugin marketplace add $Repository ; then open /plugins and install Shiori. -Install codex also writes MCP config.
+  Claude:   /plugin marketplace add $Repository ; then /plugin install shiori@$Marketplace. -Install claude also writes MCP config.
   ZCode:    Settings -> Plugins -> Create -> Add marketplace -> $Repository; install Shiori.
-  Cursor:   Settings -> Plugins; add https://github.com/$Repository; install Shiori.
+  Cursor:   Settings -> Plugins; add https://github.com/$Repository; install Shiori. -Install cursor writes MCP config.
   MCode:    select -Install mcode to use the same managed checkout and global Agent Skills links.
   Vibe:     select -Install vibe to use the same managed checkout and global Agent Skills links.
   Devin:    connect this repository to the cloud workspace; no local executable is required.
@@ -642,7 +716,7 @@ if ($Operation -eq 'update' -and $Targets.Count -eq 0) {
     $Targets = @(Get-Content -LiteralPath $InstalledHostsFile)
 }
 $Targets = @($Targets | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ } | ForEach-Object { if ($_ -eq 'claude-code') { 'claude' } else { $_ } } | Select-Object -Unique)
-if ($Operation -eq 'install' -and $Targets.Count -eq 0) { throw 'Pass at least one installer: opencode, mcode, vibe, codex, or claude.' }
+if ($Operation -eq 'install' -and $Targets.Count -eq 0) { throw 'Pass at least one installer: opencode, mcode, vibe, codex, claude, or cursor.' }
 if ($Operation) {
     foreach ($Target in $Targets) { Assert-PluginInstaller $Target }
     Write-Host ''
@@ -656,10 +730,11 @@ if ($Operation) {
     foreach ($Target in $Targets) {
         switch (($Operation + ':' + $Target)) {
             { $_ -in @('install:opencode', 'install:mcode', 'install:vibe', 'update:opencode', 'update:mcode', 'update:vibe') } { Add-RecordedHost $Target }
-            'install:codex' { Install-CodexPlugin }
-            'install:claude' { Install-ClaudePlugin }
-            'update:codex' { Update-CodexPlugin }
-            'update:claude' { Update-ClaudePlugin }
+            'install:codex' { Install-CodexPlugin; Invoke-McpCli -McpArgs @('install', '--host', 'codex') }
+            'install:claude' { Install-ClaudePlugin; Invoke-McpCli -McpArgs @('install', '--host', 'claude') }
+            { $_ -in @('install:cursor', 'update:cursor') } { Invoke-McpCli -McpArgs @('install', '--host', 'cursor'); Add-RecordedHost cursor }
+            'update:codex' { Update-CodexPlugin; Invoke-McpCli -McpArgs @('install', '--host', 'codex') }
+            'update:claude' { Update-ClaudePlugin; Invoke-McpCli -McpArgs @('install', '--host', 'claude') }
         }
     }
 }

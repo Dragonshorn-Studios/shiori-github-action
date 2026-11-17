@@ -2,7 +2,8 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractDocumentLinks, rewriteDocumentLinks } from './links.js';
-import { normalizeMarkdown, sha256, slugify, stableJson } from './model.js';
+import { normalizeMarkdown, sha256, slugify, stableJson, stripFrontmatter, summarizeMarkdown } from './model.js';
+import { renderMcpDataYaml } from './mcp-config.js';
 import { generateSkills } from './skills.js';
 
 const MANAGED_START = '<!-- shiori:start -->';
@@ -53,7 +54,13 @@ export async function compile(source, config) {
 
   if (config.agentFile) await updateAgentFile(config);
   if (config.pages) {
-    await write(dirname(outputRoot), '_data/shiori-nav.yml', renderNavigation(documents, pathById, config.rootDocumentId, agentTaggedIds, skillTaggedIds));
+    const docsRoot = dirname(outputRoot);
+    await write(docsRoot, '_data/shiori-nav.yml', renderNavigation(documents, pathById, config.rootDocumentId, agentTaggedIds, skillTaggedIds));
+    await write(docsRoot, '_data/shiori-mcp.yml', renderMcpDataYaml());
+    await write(docsRoot, 'index.json', stableJson(createKnowledgeIndex(written, skillTaggedIds, agentTaggedIds)));
+    for (const item of written) {
+      await write(docsRoot, `raw/${item.path}`, stripFrontmatter(item.content).replace(/^\n/, ''));
+    }
     await writePagesShell(config, outputRoot);
   }
   let skillCount = 0;
@@ -130,6 +137,26 @@ function createManifest(written, config, skillTaggedIds, agentTaggedIds) {
       agent: agentTaggedIds.has(document.id),
       sha256: sha256(content)
     }))
+  };
+}
+
+function createKnowledgeIndex(written, skillTaggedIds, agentTaggedIds) {
+  return {
+    schemaVersion: 1,
+    generator: 'shiori',
+    documents: written
+      .slice()
+      .sort((a, b) => a.path.localeCompare(b.path) || a.document.id.localeCompare(b.document.id))
+      .map(({ document, path, content }) => ({
+        id: document.id,
+        title: agentTaggedIds.has(document.id) ? displayTitle(document) : document.title,
+        summary: summarizeMarkdown(content),
+        tags: [
+          ...(skillTaggedIds.has(document.id) ? ['skill'] : []),
+          ...(agentTaggedIds.has(document.id) ? ['agent'] : [])
+        ],
+        url: `raw/${path}`
+      }))
   };
 }
 
@@ -217,7 +244,8 @@ async function updateAgentFile(config) {
   const target = safeRepositoryPath(config.repositoryRoot, config.agentFile);
   let existing = '';
   try { existing = await readFile(target, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const block = `${MANAGED_START}\n## Project knowledge\n\nProject knowledge is available under \`${config.outputDirectory.replaceAll('\\', '/')}\`.\n\nRead \`${config.outputDirectory.replaceAll('\\', '/')}/README.md\` before planning substantial changes, then follow links to the relevant documentation. AFFiNE is canonical; these files are a generated snapshot and must not be edited manually.\n${MANAGED_END}`;
+  const outputDirectory = config.outputDirectory.replaceAll('\\', '/');
+  const block = `${MANAGED_START}\n## Project knowledge\n\nProject knowledge is available under \`${outputDirectory}\`.\n\nConsult shiori-brain on demand (\`search\` / \`read_doc\`) before architecture or security decisions; do not dump that knowledge into context. Skills are procedures only.\n\nRead \`${outputDirectory}/README.md\` before planning substantial changes, then follow links to the relevant documentation. AFFiNE is canonical; these files are a generated snapshot and must not be edited manually.\n${MANAGED_END}`;
   const pattern = new RegExp(`${escapeRegExp(MANAGED_START)}[\\s\\S]*?${escapeRegExp(MANAGED_END)}`);
   const content = pattern.test(existing) ? existing.replace(pattern, block) : `${existing.trim()}${existing.trim() ? '\n\n' : ''}${block}\n`;
   await mkdir(dirname(target), { recursive: true });

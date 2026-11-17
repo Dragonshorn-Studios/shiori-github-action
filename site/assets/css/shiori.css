@@ -38,6 +38,9 @@ pre code { border: 0; padding: 0; }
 blockquote { margin-left: 0; border-left: .18rem solid var(--gold); padding-left: 1rem; color: var(--muted); }
 .bookmark { color: var(--gold); font-size: .45em; vertical-align: top; }
 .archive-button { display: inline-block; margin-top: 1rem; border: 1px solid var(--accent); padding: .55rem 1rem; text-decoration: none; }
+.document table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+.document th, .document td { border: 1px solid var(--rule); padding: .4rem .6rem; text-align: left; vertical-align: top; }
+.document th { color: var(--gold); font-weight: 500; }
 .provenance { margin-top: 3rem; color: var(--muted); font-style: italic; }
 footer { border-top: 1px solid var(--rule); padding: 1.5rem; color: var(--muted); text-align: center; font: .7rem ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
 @media (max-width: 760px) { .page-shell { display: block; padding-top: 1.5rem; } .catalogue { position: static; margin-bottom: 2rem; } .document { padding: 1.25rem; } }

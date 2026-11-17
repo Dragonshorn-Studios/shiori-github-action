@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeMarkdown } from '../src/model.js';
+import { normalizeMarkdown, summarizeMarkdown } from '../src/model.js';
 
 test('normalizes AFFiNE markdown export artifacts', () => {
   const input = `Work through one item per&#10;issue.\n\n1. First\n1. Second\n\n## Other\n1. New list\n\nUse [AGENTS.md/README/CI](http://AGENTS.md/README/CI) and [deferred.md](http://deferred.md).\nKeep [example.com/guide.md](http://example.com/guide.md) linked.\nWait up to \\~30 min.\n\n\`\`\` markdown\nbody\n\`\`\``;
@@ -19,6 +19,11 @@ test('normalizes AFFiNE markdown export artifacts', () => {
 test('renumbers nested ordered lists independently', () => {
   const output = normalizeMarkdown('1. Parent\n  1. Child one\n  1. Child two\n1. Parent two');
   assert.equal(output, '1. Parent\n  1. Child one\n  2. Child two\n2. Parent two\n');
+});
+
+test('summarizes the first paragraph and ignores headings', () => {
+  const summary = summarizeMarkdown('---\ntitle: X\n---\n\n# Title\n\n> quote\n\nRead [Architecture](architecture.md) and ship it.\n\nSecond paragraph.');
+  assert.equal(summary, 'Read Architecture and ship it.');
 });
 
 test('does not normalize literal examples inside code fences', () => {

@@ -16,5 +16,6 @@ test('updates only the managed AGENTS section', async () => {
   const content = await readFile(target, 'utf8');
   assert.match(content, /Keep me\./);
   assert.doesNotMatch(content, /\nold\n/);
+  assert.match(content, /Consult shiori-brain on demand/);
   assert.equal((content.match(/shiori:start/g) ?? []).length, 1);
 });
