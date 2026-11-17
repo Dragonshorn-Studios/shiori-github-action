@@ -149,8 +149,10 @@ test('generates a dependency-free Pages shell and recursive navigation', async (
   assert.match(css, /var\(--glow\)/);
   assert.match(home, /site.data.shiori-mcp/);
   assert.match(mcp, /name: "shiori-brain"/);
+  assert.match(mcp, /command: "node ~\/.local\/share\/shiori\/shiori-brain\/packages\/shiori-brain-mcp\/src\/index.js"/);
   assert.match(mcp, /command: "figcraft-cli mcp"/);
   assert.match(mcp, /when_installed: true/);
+  assert.doesNotMatch(mcp, /npx/);
   assert.equal(index.schemaVersion, 1);
   assert.deepEqual(index.documents.map(item => item.id).sort(), ['architecture', 'decision-one', 'product', 'root']);
   const architecture = index.documents.find(item => item.id === 'architecture');
@@ -282,7 +284,9 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(setupGuide, /--install opencode mcode vibe codex claude cursor/);
   assert.match(setupGuide, /--update/);
   assert.match(setupGuide, /figcraft-cli mcp/);
+  assert.match(setupGuide, /claude mcp add -s user/);
   assert.match(setupGuide, /Consult shiori-brain on demand/);
+  assert.doesNotMatch(setupGuide, /npx -y shiori-brain-mcp/);
   const shellDoctor = await readFile(join(repositoryRoot, 'scripts/shiori-doctor.sh'), 'utf8');
   assert.match(shellDoctor, /context='remote'/);
   assert.match(shellDoctor, /codex plugin add/);
@@ -294,6 +298,8 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(shellDoctor, /host_is_recorded codex/);
   assert.match(shellDoctor, /run_mcp_cli install --host cursor/);
   assert.match(shellDoctor, /run_mcp_cli verify/);
+  assert.match(shellDoctor, /--checkout \"\$checkout\"/);
+  assert.match(shellDoctor, /packages\/shiori-brain-mcp\/src\/index.js/);
   const powerShellDoctor = await readFile(join(repositoryRoot, 'scripts/shiori-doctor.ps1'), 'utf8');
   assert.match(powerShellDoctor, /Get-Command/);
   assert.match(powerShellDoctor, /'remote'/);
@@ -304,6 +310,11 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(powerShellDoctor, /Test-SharedSkillsInstalled/);
   assert.match(powerShellDoctor, /Test-RecordedHost codex/);
   assert.match(powerShellDoctor, /Invoke-McpCli -McpArgs @\('install', '--host', 'cursor'\)/);
-  const helper = await readFile(join(repositoryRoot, 'scripts/shiori-mcp.js'), 'utf8');
+  assert.match(powerShellDoctor, /--checkout \$ManagedCheckout/);
+  assert.match(powerShellDoctor, /packages\/shiori-brain-mcp\/src\/index.js/);
+  const helper = await readFile(join(repositoryRoot, 'scripts/shiori-mcp.mjs'), 'utf8');
   assert.match(helper, /figcraft-cli/);
+  assert.match(helper, /packages\/shiori-brain-mcp\/src\/index.js/);
+  assert.doesNotMatch(helper, /npx -y shiori-brain-mcp/);
+  await readFile(join(repositoryRoot, 'packages/shiori-brain-mcp/src/index.js'), 'utf8');
 });

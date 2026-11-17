@@ -9,6 +9,16 @@ export function mcpHelperSource() {
   return readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'mcp-config.js'), 'utf8');
 }
 
+function mcpPackageFiles() {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'packages', 'shiori-brain-mcp');
+  return [
+    ['packages/shiori-brain-mcp/src/index.js', readFileSync(join(root, 'src/index.js'), 'utf8')],
+    ['packages/shiori-brain-mcp/src/knowledge.js', readFileSync(join(root, 'src/knowledge.js'), 'utf8')],
+    ['packages/shiori-brain-mcp/package.json', readFileSync(join(root, 'package.json'), 'utf8')],
+    ['packages/shiori-brain-mcp/README.md', readFileSync(join(root, 'README.md'), 'utf8')]
+  ];
+}
+
 export function installSupportFiles(config) {
   const repository = config.repository || DEFAULT_REPOSITORY;
   const marketplace = config.marketplaceName || 'shiori-knowledge';
@@ -16,7 +26,8 @@ export function installSupportFiles(config) {
     ['AGENT-SETUP.md', renderGuide(repository, marketplace)],
     ['scripts/shiori-doctor.sh', renderShellDoctor(repository, marketplace)],
     ['scripts/shiori-doctor.ps1', renderPowerShellDoctor(repository, marketplace)],
-    ['scripts/shiori-mcp.js', mcpHelperSource()]
+    ['scripts/shiori-mcp.mjs', mcpHelperSource()],
+    ...mcpPackageFiles()
   ]);
 }
 
@@ -90,7 +101,7 @@ Pass names after \`--update\`, or use PowerShell \`-Update -UpdateTargets openco
 
 ## MCP servers
 
-The doctor can add a local stdio MCP client for the published Pages archive, plus Storytold Craft CLIs that are already on \`PATH\`. Default doctor mode is still read-only. MCP writes happen only under \`--install\` / \`--update\` for Cursor (\`~/.cursor/mcp.json\`), Claude Code (\`~/.claude.json\`), and Codex (\`~/.codex/config.toml\`). Existing non-Shiori MCP entries are never overwritten.
+The doctor can add a local stdio MCP client for the published Pages archive, plus Storytold Craft CLIs that are already on \`PATH\`. Default doctor mode is still read-only. MCP writes happen only under \`--install\` / \`--update\`: Cursor via \`~/.cursor/mcp.json\`, Claude Code via \`claude mcp add -s user\`, and Codex via \`codex mcp add\`. The shiori-brain server is \`node <checkout>/packages/shiori-brain-mcp/src/index.js\` from the managed checkout; it is not loaded from a package registry. Existing non-Shiori MCP entries are never overwritten.
 
 ${renderMcpMarkdownTable()}
 Consult shiori-brain on demand (\`search\` / \`read_doc\`) before architecture or security decisions; do not dump that knowledge into context. Skills are procedures only.
@@ -100,7 +111,8 @@ Consult shiori-brain on demand (\`search\` / \`read_doc\`) before architecture o
 - \`plugins/shiori/plugin.json\`: portable [Agent Plugins](https://agent-plugins.org/) manifest.
 - \`plugins/shiori/.codex-plugin/plugin.json\`: Codex compatibility manifest.
 - \`.agents/plugins/marketplace.json\`: native repository marketplace for Codex and ChatGPT desktop.
-- \`scripts/shiori-mcp.js\`: helper used by the doctor to add and verify MCP entries.
+- \`scripts/shiori-mcp.mjs\`: helper used by the doctor to add and verify MCP entries.
+- \`packages/shiori-brain-mcp/\`: local stdio MCP server launched from the managed checkout.
 - Host-specific project skill directories, all generated from the same AFFiNE documents.
 
 AFFiNE remains canonical. Do not edit generated skills, manifests, this guide, or the doctor scripts by hand; change Shiori and regenerate them.
@@ -137,19 +149,19 @@ resolve_mcp_helper() {
     printf '%s\\n' \"$SHIORI_MCP_HELPER\"
     return 0
   fi
-  if [ -f 'scripts/shiori-mcp.js' ]; then
-    printf '%s\\n' 'scripts/shiori-mcp.js'
+  if [ -f 'scripts/shiori-mcp.mjs' ]; then
+    printf '%s\\n' 'scripts/shiori-mcp.mjs'
     return 0
   fi
   has_command curl || { printf '%s\\n' 'Cannot load the Shiori MCP helper: curl is not available.' >&2; return 1; }
-  mcp_helper_tmp=$(mktemp)
-  curl -fsSL \"https://raw.githubusercontent.com/$repository/main/scripts/shiori-mcp.js\" > \"$mcp_helper_tmp\"
+  mcp_helper_tmp=\"\${TMPDIR:-/tmp}/shiori-mcp-$$.mjs\"
+  curl -fsSL \"https://raw.githubusercontent.com/$repository/main/scripts/shiori-mcp.mjs\" > \"$mcp_helper_tmp\"
   printf '%s\\n' \"$mcp_helper_tmp\"
 }
 run_mcp_cli() {
   has_command node || { printf '%s\\n' 'Skipping MCP config: node is not available.'; return 0; }
   helper=$(resolve_mcp_helper) || return 1
-  node \"$helper\" \"$@\"
+  node \"$helper\" \"$@\" --home \"$HOME\" --checkout \"$checkout\"
 }
 contains_text() {
   case $1 in
@@ -388,14 +400,22 @@ if [ -n \"$operation\" ]; then
   previous_ifs=$IFS
   IFS=', '
   shared_skills_selected='false'
+  mcp_selected='false'
   for selected_target in $selected_targets; do
     assert_installer \"$selected_target\"
     case $selected_target in opencode|mcode|vibe) shared_skills_selected='true' ;; esac
+    case $selected_target in cursor|claude|claude-code|codex) mcp_selected='true' ;; esac
   done
   if [ \"$shared_skills_selected\" = true ]; then
     [ \"$operation\" != update ] || [ -d \"$checkout/.git\" ] || { printf 'No managed checkout exists to update: %s\\n' \"$checkout\" >&2; exit 2; }
     ensure_checkout
     sync_shared_skills
+  fi
+  if [ \"$mcp_selected\" = true ]; then
+    mcp_script=\"$checkout/packages/shiori-brain-mcp/src/index.js\"
+    if [ ! -f \"$mcp_script\" ]; then ensure_checkout; fi
+    if [ \"$operation\" = update ] && [ -d \"$checkout/.git\" ]; then ensure_checkout; fi
+    [ -f \"$mcp_script\" ] || { printf 'Shiori checkout is missing the MCP server: %s\\n' \"$mcp_script\" >&2; exit 1; }
   fi
   for selected_target in $selected_targets; do
     case \"$operation:$selected_target\" in
@@ -436,9 +456,9 @@ $ProjectHint = if ($LocalCheckout) { 'project adapters are ready in this checkou
 
 function Get-McpHelper {
     if ($env:SHIORI_MCP_HELPER -and (Test-Path -LiteralPath $env:SHIORI_MCP_HELPER)) { return $env:SHIORI_MCP_HELPER }
-    if (Test-Path -LiteralPath 'scripts\\shiori-mcp.js') { return (Resolve-Path -LiteralPath 'scripts\\shiori-mcp.js').Path }
-    $script:McpHelperTemp = Join-Path ([IO.Path]::GetTempPath()) ('shiori-mcp-' + [guid]::NewGuid().ToString() + '.js')
-    Invoke-WebRequest -UseBasicParsing -Uri \"https://raw.githubusercontent.com/$Repository/main/scripts/shiori-mcp.js\" -OutFile $script:McpHelperTemp
+    if (Test-Path -LiteralPath 'scripts\\shiori-mcp.mjs') { return (Resolve-Path -LiteralPath 'scripts\\shiori-mcp.mjs').Path }
+    $script:McpHelperTemp = Join-Path ([IO.Path]::GetTempPath()) ('shiori-mcp-' + [guid]::NewGuid().ToString() + '.mjs')
+    Invoke-WebRequest -UseBasicParsing -Uri \"https://raw.githubusercontent.com/$Repository/main/scripts/shiori-mcp.mjs\" -OutFile $script:McpHelperTemp
     return $script:McpHelperTemp
 }
 
@@ -449,7 +469,7 @@ function Invoke-McpCli {
         return
     }
     $Helper = Get-McpHelper
-    & node $Helper @McpArgs
+    & node $Helper @McpArgs --home $HOME --checkout $ManagedCheckout
     if ($LASTEXITCODE -ne 0) { throw \"Shiori MCP helper failed with exit code $LASTEXITCODE\" }
 }
 
@@ -722,10 +742,17 @@ if ($Operation) {
     Write-Host ''
     Write-Host \"Selected operation: $Operation\"
     $SharedTargets = @($Targets | Where-Object { $_ -in @('opencode', 'mcode', 'vibe') })
+    $McpTargets = @($Targets | Where-Object { $_ -in @('cursor', 'claude', 'codex') })
     if ($SharedTargets.Count -gt 0) {
         if ($Operation -eq 'update' -and -not (Test-Path -LiteralPath (Join-Path $ManagedCheckout '.git'))) { throw \"No managed checkout exists to update: $ManagedCheckout\" }
         Update-ManagedCheckout
         Sync-SharedSkills
+    }
+    if ($McpTargets.Count -gt 0) {
+        $McpScript = Join-Path $ManagedCheckout 'packages/shiori-brain-mcp/src/index.js'
+        if (-not (Test-Path -LiteralPath $McpScript)) { Update-ManagedCheckout }
+        if ($Operation -eq 'update' -and (Test-Path -LiteralPath (Join-Path $ManagedCheckout '.git'))) { Update-ManagedCheckout }
+        if (-not (Test-Path -LiteralPath $McpScript)) { throw \"Shiori checkout is missing the MCP server: $McpScript\" }
     }
     foreach ($Target in $Targets) {
         switch (($Operation + ':' + $Target)) {

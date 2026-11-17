@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-import { accessSync, constants, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const SHIORI_BRAIN_MCP_PACKAGE = 'shiori-brain-mcp';
-export const SHIORI_BRAIN_MCP_ARGS = ['-y', SHIORI_BRAIN_MCP_PACKAGE];
+export const DEFAULT_CHECKOUT_DISPLAY = '~/.local/share/shiori/shiori-brain';
+export const SHIORI_BRAIN_MCP_SCRIPT = 'packages/shiori-brain-mcp/src/index.js';
 export const SHIORI_RULE_TEXT = 'Consult shiori-brain on demand (`search` / `read_doc`) before architecture or security decisions; do not dump that knowledge into context. Skills are procedures only.';
+const BLOCK_START = '<!-- shiori:start -->';
+const BLOCK_END = '<!-- shiori:end -->';
 
 export const CRAFT_APPS = [
   { name: 'figcraft', command: 'figcraft-cli', summary: 'Interface design (FigCraft)' },
@@ -27,51 +29,69 @@ export const MCP_HOSTS = {
   cursor: {
     id: 'cursor',
     label: 'Cursor',
-    format: 'json',
+    kind: 'json',
     detectPath: '.cursor',
     configPath: '.cursor/mcp.json',
-    rulePath: '.cursor/rules/shiori-brain.mdc',
-    ruleKind: 'mdc'
+    instructionPath: null
   },
   claude: {
     id: 'claude',
     label: 'Claude Code',
-    format: 'json',
+    kind: 'claude-cli',
     detectPath: '.claude',
     configPath: '.claude.json',
-    rulePath: '.claude/rules/shiori-brain.md',
-    ruleKind: 'md'
+    instructionPath: '.claude/CLAUDE.md'
   },
   'claude-code': {
     id: 'claude',
     label: 'Claude Code',
-    format: 'json',
+    kind: 'claude-cli',
     detectPath: '.claude',
     configPath: '.claude.json',
-    rulePath: '.claude/rules/shiori-brain.md',
-    ruleKind: 'md'
+    instructionPath: '.claude/CLAUDE.md'
   },
   codex: {
     id: 'codex',
     label: 'Codex',
-    format: 'toml',
+    kind: 'codex-cli',
     detectPath: '.codex',
     configPath: '.codex/config.toml',
-    rulePath: '.codex/rules/shiori-brain.md',
-    ruleKind: 'md'
+    instructionPath: '.codex/AGENTS.md'
   }
 };
 
-export function mcpServerCatalog() {
+export function defaultCheckout(home) {
+  return join(home, '.local/share/shiori/shiori-brain');
+}
+
+export function resolveCheckout(checkout, home) {
+  const raw = checkout || defaultCheckout(home);
+  if (raw.startsWith('~/')) return resolve(home, raw.slice(2));
+  return resolve(raw);
+}
+
+export function shioriBrainScript(checkout) {
+  return join(checkout, ...SHIORI_BRAIN_MCP_SCRIPT.split('/'));
+}
+
+export function shioriBrainServer(checkout, { display = false } = {}) {
+  const script = display ? `${DEFAULT_CHECKOUT_DISPLAY}/${SHIORI_BRAIN_MCP_SCRIPT}` : shioriBrainScript(checkout);
+  return {
+    name: 'shiori-brain',
+    command: 'node',
+    args: [script],
+    invocation: `node ${script}`,
+    summary: 'Search and read the published Shiori knowledge archive',
+    whenInstalled: false
+  };
+}
+
+export function mcpServerCatalog(options = {}) {
+  const brain = options.checkout
+    ? shioriBrainServer(options.checkout)
+    : shioriBrainServer(DEFAULT_CHECKOUT_DISPLAY, { display: true });
   return [
-    {
-      name: 'shiori-brain',
-      command: 'npx',
-      args: [...SHIORI_BRAIN_MCP_ARGS],
-      invocation: `npx ${SHIORI_BRAIN_MCP_ARGS.join(' ')}`,
-      summary: 'Search and read the published Shiori knowledge archive',
-      whenInstalled: false
-    },
+    brain,
     ...CRAFT_APPS.map(app => ({
       name: app.name,
       command: app.command,
@@ -106,14 +126,6 @@ export function renderMcpDataYaml() {
   ].join('\n')).join('\n') + '\n';
 }
 
-export function renderCursorRule() {
-  return `---\ndescription: Consult shiori-brain on demand\nalwaysApply: true\n---\n\n${SHIORI_RULE_TEXT}\n`;
-}
-
-export function renderPlainRule() {
-  return `${SHIORI_RULE_TEXT}\n`;
-}
-
 export function resolveCommand(name, env = process.env) {
   const paths = String(env.PATH || '').split(delimiter).filter(Boolean);
   const extensions = process.platform === 'win32'
@@ -141,6 +153,10 @@ function argsList(value) {
   return Array.isArray(value) ? value.map(item => String(item)) : [];
 }
 
+function posixPath(value) {
+  return String(value || '').replaceAll('\\', '/');
+}
+
 function isHttpEntry(entry) {
   if (!entry || typeof entry !== 'object') return false;
   const type = String(entry.type || '').toLowerCase();
@@ -148,27 +164,37 @@ function isHttpEntry(entry) {
 }
 
 export function isShioriBrainEntry(entry) {
-  if (isHttpEntry(entry)) return false;
-  if (commandBasename(entry?.command) !== 'npx') return false;
+  if (!entry || typeof entry !== 'object' || isHttpEntry(entry)) return false;
+  if (commandBasename(entry.command) !== 'node') return false;
   const args = argsList(entry.args);
-  const packageArg = args.find(arg => arg === SHIORI_BRAIN_MCP_PACKAGE || arg.startsWith(`${SHIORI_BRAIN_MCP_PACKAGE}@`));
-  if (!packageArg) return false;
-  return args.every(arg => arg === '-y' || arg === '--yes' || arg === packageArg);
+  if (args.length !== 1) return false;
+  const arg = posixPath(args[0]);
+  return arg === SHIORI_BRAIN_MCP_SCRIPT || arg.endsWith(`/${SHIORI_BRAIN_MCP_SCRIPT}`);
 }
 
 export function isCraftEntry(entry, commandName) {
-  if (isHttpEntry(entry)) return false;
-  if (commandBasename(entry?.command) !== commandName) return false;
+  if (!entry || typeof entry !== 'object' || isHttpEntry(entry)) return false;
+  if (commandBasename(entry.command) !== commandName) return false;
   const args = argsList(entry.args);
   return args.length === 1 && args[0] === 'mcp';
 }
 
 export function entriesEquivalent(existing, desired) {
-  if (!existing) return false;
+  if (!existing || !desired) return false;
   if (commandBasename(existing.command) !== commandBasename(desired.command)) return false;
   const existingArgs = argsList(existing.args);
   const desiredArgs = argsList(desired.args);
-  return existingArgs.length === desiredArgs.length && existingArgs.every((arg, index) => arg === desiredArgs[index]);
+  if (existingArgs.length !== desiredArgs.length) return false;
+  return existingArgs.every((arg, index) => {
+    const left = posixPath(arg);
+    const right = posixPath(desiredArgs[index]);
+    if (left === right) return true;
+    try {
+      return resolve(left) === resolve(right);
+    } catch {
+      return false;
+    }
+  });
 }
 
 function desiredEntry(server) {
@@ -176,7 +202,8 @@ function desiredEntry(server) {
 }
 
 export function classifyEntry(existing, server) {
-  if (!existing || (existing.command == null && !argsList(existing.args).length)) return 'missing';
+  if (existing == null) return 'missing';
+  if (typeof existing !== 'object' || Array.isArray(existing)) return 'conflict';
   if (entriesEquivalent(existing, desiredEntry(server))) return 'match';
   const owned = server.name === 'shiori-brain'
     ? isShioriBrainEntry(existing)
@@ -196,6 +223,15 @@ function readText(path) {
 function writeText(path, content) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, content, 'utf8');
+}
+
+export function writeJsonAtomic(path, content) {
+  mkdirSync(dirname(path), { recursive: true });
+  const current = readText(path);
+  if (current != null) writeFileSync(`${path}.bak`, current, 'utf8');
+  const temp = `${path}.${process.pid}.tmp`;
+  writeFileSync(temp, content, 'utf8');
+  renameSync(temp, path);
 }
 
 function parseJsonConfig(text) {
@@ -218,8 +254,13 @@ export function applyJsonMcpConfig(text, servers) {
   const reports = [];
   let changed = false;
   for (const server of servers) {
-    const existing = config.mcpServers[server.name];
-    const classification = classifyEntry(existing, server);
+    const has = Object.prototype.hasOwnProperty.call(config.mcpServers, server.name);
+    const existing = has ? config.mcpServers[server.name] : null;
+    const classification = !has
+      ? 'missing'
+      : (existing == null || typeof existing !== 'object' || Array.isArray(existing))
+        ? 'conflict'
+        : classifyEntry(existing, server);
     if (classification === 'match') {
       reports.push({ name: server.name, status: 'unchanged' });
       continue;
@@ -241,114 +282,16 @@ export function applyJsonMcpConfig(text, servers) {
   return { text: stringifyJsonConfig(config), changed, reports, config };
 }
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function findTomlTable(text, header) {
-  const re = new RegExp(`^\\[${escapeRegExp(header)}\\][ \\t]*$`, 'm');
-  const match = re.exec(text);
-  if (!match) return null;
-  const headerEnd = match.index + match[0].length;
-  const rest = text.slice(headerEnd);
-  const next = rest.search(/^\[[^\]]+\][ \t]*$/m);
-  const end = next === -1 ? text.length : headerEnd + next;
-  return { start: match.index, headerEnd, end, body: text.slice(headerEnd, end) };
-}
-
-function unquoteToml(value) {
-  const trimmed = value.trim();
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-function parseTomlStringArray(value) {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) return null;
-  const inner = trimmed.slice(1, -1).trim();
-  if (!inner) return [];
-  return inner.split(',').map(part => unquoteToml(part));
-}
-
-export function parseTomlMcpEntry(body) {
-  const entry = {};
-  for (const line of String(body).split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('[')) continue;
-    const match = trimmed.match(/^([A-Za-z0-9_-]+)\s*=\s*(.*)$/);
-    if (!match) continue;
-    if (match[1] === 'command') entry.command = unquoteToml(match[2]);
-    if (match[1] === 'args') {
-      const args = parseTomlStringArray(match[2]);
-      if (args) entry.args = args;
-    }
-  }
-  return entry;
-}
-
-function tomlStringArray(args) {
-  return `[${args.map(arg => JSON.stringify(arg)).join(', ')}]`;
-}
-
-function renderTomlServerBlock(server) {
-  return `[mcp_servers.${server.name}]\ncommand = ${JSON.stringify(server.command)}\nargs = ${tomlStringArray(server.args)}\n`;
-}
-
-function replaceTomlKey(body, key, rendered) {
-  const re = new RegExp(`^${escapeRegExp(key)}\\s*=\\s*.*$`, 'm');
-  if (re.test(body)) return body.replace(re, rendered);
-  const prefix = body.startsWith('\n') ? '' : '\n';
-  return `${prefix}${rendered}\n${body.replace(/^\n/, '')}`;
-}
-
-export function applyTomlMcpConfig(text, servers) {
-  let next = text == null ? '' : String(text);
-  const reports = [];
-  let changed = false;
-  for (const server of servers) {
-    const table = findTomlTable(next, `mcp_servers.${server.name}`);
-    if (!table) {
-      const prefix = !next || next.endsWith('\n') ? '' : '\n';
-      const blank = !next || next.endsWith('\n\n') ? '' : (next.length ? '\n' : '');
-      next = `${next}${prefix}${blank}${renderTomlServerBlock(server)}`;
-      reports.push({ name: server.name, status: 'added' });
-      changed = true;
-      continue;
-    }
-    const existing = parseTomlMcpEntry(table.body);
-    const classification = classifyEntry(existing, server);
-    if (classification === 'match') {
-      reports.push({ name: server.name, status: 'unchanged' });
-      continue;
-    }
-    if (classification === 'conflict') {
-      reports.push({ name: server.name, status: 'conflict', message: 'existing non-Shiori entry left untouched' });
-      continue;
-    }
-    let body = table.body;
-    body = replaceTomlKey(body, 'command', `command = ${JSON.stringify(server.command)}`);
-    body = replaceTomlKey(body, 'args', `args = ${tomlStringArray(server.args)}`);
-    next = `${next.slice(0, table.headerEnd)}${body}${next.slice(table.end)}`;
-    reports.push({ name: server.name, status: 'updated' });
-    changed = true;
-  }
-  return { text: next, changed, reports };
-}
-
 function readJsonEntry(text, name) {
   try {
-    return parseJsonConfig(text).mcpServers?.[name] ?? null;
+    const config = parseJsonConfig(text);
+    if (!Object.prototype.hasOwnProperty.call(config.mcpServers, name)) return null;
+    const existing = config.mcpServers[name];
+    if (existing == null || typeof existing !== 'object' || Array.isArray(existing)) return { url: 'invalid-entry' };
+    return existing;
   } catch {
     return undefined;
   }
-}
-
-function readTomlEntry(text, name) {
-  const table = findTomlTable(text ?? '', `mcp_servers.${name}`);
-  if (!table) return null;
-  return parseTomlMcpEntry(table.body);
 }
 
 export function selectServersForInstall(catalog, env = process.env) {
@@ -377,54 +320,163 @@ function verifyBinary(server, env) {
   }
 }
 
-export function planHostMcp(host, home, env, { write }) {
-  const catalog = mcpServerCatalog();
-  const configPath = join(home, host.configPath);
-  const currentText = readText(configPath);
-  const { selected, skipped } = selectServersForInstall(catalog, env);
-  const reports = skipped.map(server => ({ name: server.name, status: 'skipped', message: `${server.command} is not on PATH` }));
-  let nextText = currentText;
-  let changed = false;
-  if (write) {
-    const applied = host.format === 'toml'
-      ? applyTomlMcpConfig(currentText, selected)
-      : applyJsonMcpConfig(currentText, selected);
-    reports.push(...applied.reports);
-    nextText = applied.text;
-    changed = applied.changed;
-  } else {
-    for (const server of selected) {
-      const existing = host.format === 'toml'
-        ? readTomlEntry(currentText, server.name)
-        : readJsonEntry(currentText, server.name);
-      if (existing === undefined) {
-        reports.push({ name: server.name, status: 'error', message: `unable to parse ${host.configPath}` });
-        continue;
-      }
-      const classification = classifyEntry(existing, server);
-      if (classification === 'match') {
+function unwrapCliEntry(value) {
+  if (!value || typeof value !== 'object') return value;
+  if (value.config && typeof value.config === 'object') return unwrapCliEntry(value.config);
+  if (value.server && typeof value.server === 'object') return unwrapCliEntry(value.server);
+  return value;
+}
+
+export function parseCliMcpEntry(stdout) {
+  const text = String(stdout ?? '').trim();
+  if (!text) return null;
+  try {
+    return unwrapCliEntry(JSON.parse(text));
+  } catch {
+    // fall through to the line parser
+  }
+  const entry = {};
+  const url = text.match(/^\s*url:\s*(\S+)/mi)?.[1];
+  const command = text.match(/^\s*command:\s*(\S+)/mi)?.[1];
+  const argsLine = text.match(/^\s*args:\s*(.+)$/mi)?.[1];
+  if (url) entry.url = url.replace(/^["']|["']$/g, '');
+  if (command) entry.command = command.replace(/^["']|["']$/g, '');
+  if (argsLine) {
+    try {
+      entry.args = JSON.parse(argsLine);
+    } catch {
+      entry.args = argsLine.split(/\s+/).filter(Boolean);
+    }
+  }
+  return Object.keys(entry).length ? entry : null;
+}
+
+function runHostCli(bin, args, env, execFile) {
+  try {
+    const stdout = execFile(bin, args, { encoding: 'utf8', env, timeout: 15000, stdio: ['ignore', 'pipe', 'pipe'] });
+    return { ok: true, stdout: String(stdout ?? '') };
+  } catch (error) {
+    return {
+      ok: false,
+      stdout: String(error.stdout ?? ''),
+      stderr: String(error.stderr ?? error.message ?? ''),
+      status: error.status
+    };
+  }
+}
+
+function getCliEntry(host, name, env, execFile) {
+  const result = host.kind === 'claude-cli'
+    ? runHostCli('claude', ['mcp', 'get', name], env, execFile)
+    : runHostCli('codex', ['mcp', 'get', name, '--json'], env, execFile);
+  if (!result.ok) return null;
+  return parseCliMcpEntry(result.stdout);
+}
+
+function addCliEntry(host, server, env, execFile) {
+  const args = host.kind === 'claude-cli'
+    ? ['mcp', 'add', '--scope', 'user', '--transport', 'stdio', server.name, '--', server.command, ...server.args]
+    : ['mcp', 'add', server.name, '--', server.command, ...server.args];
+  const bin = host.kind === 'claude-cli' ? 'claude' : 'codex';
+  const result = runHostCli(bin, args, env, execFile);
+  if (!result.ok) throw new Error(`Unable to add ${server.name} through ${bin} mcp add.`);
+}
+
+function removeCliEntry(host, name, env, execFile) {
+  const args = host.kind === 'claude-cli'
+    ? ['mcp', 'remove', '--scope', 'user', name]
+    : ['mcp', 'remove', name];
+  const bin = host.kind === 'claude-cli' ? 'claude' : 'codex';
+  const result = runHostCli(bin, args, env, execFile);
+  if (!result.ok) throw new Error(`Unable to replace ${name} through ${bin} mcp remove.`);
+}
+
+function applyCliMcpConfig(host, servers, env, execFile, { write }) {
+  const reports = [];
+  for (const server of servers) {
+    const existing = getCliEntry(host, server.name, env, execFile);
+    const classification = classifyEntry(existing, server);
+    if (classification === 'match') {
+      if (!write) {
         const binary = verifyBinary(server, env);
         reports.push(binary.ok
           ? { name: server.name, status: 'ok' }
           : { name: server.name, status: 'error', message: binary.message });
-        continue;
+      } else {
+        reports.push({ name: server.name, status: 'unchanged' });
       }
-      if (classification === 'missing') reports.push({ name: server.name, status: 'missing' });
-      else if (classification === 'stale') reports.push({ name: server.name, status: 'stale' });
-      else reports.push({ name: server.name, status: 'conflict', message: 'existing non-Shiori entry left untouched' });
+      continue;
     }
+    if (classification === 'conflict') {
+      reports.push({ name: server.name, status: 'conflict', message: 'existing non-Shiori entry left untouched' });
+      continue;
+    }
+    if (!write) {
+      reports.push({ name: server.name, status: classification });
+      continue;
+    }
+    if (classification === 'stale') removeCliEntry(host, server.name, env, execFile);
+    addCliEntry(host, server, env, execFile);
+    reports.push({ name: server.name, status: classification === 'stale' ? 'updated' : 'added' });
   }
-  return { host, configPath, currentText, nextText, changed, reports };
+  return reports;
 }
 
-export function applyRuleFile(host, home, { write }) {
-  const path = join(home, host.rulePath);
-  const desired = host.ruleKind === 'mdc' ? renderCursorRule() : renderPlainRule();
+export function planHostMcp(host, home, env, { write, checkout, execFile }) {
+  const catalog = mcpServerCatalog({ checkout });
+  const { selected, skipped } = selectServersForInstall(catalog, env);
+  const reports = skipped.map(server => ({ name: server.name, status: 'skipped', message: `${server.command} is not on PATH` }));
+  const configPath = join(home, host.configPath);
+  if (host.kind !== 'json') {
+    reports.push(...applyCliMcpConfig(host, selected, env, execFile, { write }));
+    return { host, configPath, changed: false, reports };
+  }
+  const currentText = readText(configPath);
+  if (write) {
+    const applied = applyJsonMcpConfig(currentText, selected);
+    return { host, configPath, currentText, nextText: applied.text, changed: applied.changed, reports: [...reports, ...applied.reports] };
+  }
+  for (const server of selected) {
+    const existing = readJsonEntry(currentText, server.name);
+    if (existing === undefined) {
+      reports.push({ name: server.name, status: 'error', message: `unable to parse ${host.configPath}` });
+      continue;
+    }
+    const classification = classifyEntry(existing, server);
+    if (classification === 'match') {
+      const binary = verifyBinary(server, env);
+      reports.push(binary.ok
+        ? { name: server.name, status: 'ok' }
+        : { name: server.name, status: 'error', message: binary.message });
+      continue;
+    }
+    reports.push({
+      name: server.name,
+      status: classification,
+      ...(classification === 'conflict' ? { message: 'existing non-Shiori entry left untouched' } : {})
+    });
+  }
+  return { host, configPath, currentText, nextText: currentText, changed: false, reports };
+}
+
+function instructionBlock() {
+  return `${BLOCK_START}\n${SHIORI_RULE_TEXT}\n${BLOCK_END}`;
+}
+
+export function applyInstructionFile(path, { write }) {
   const current = readText(path);
-  if (current === desired) return { path, status: 'unchanged' };
-  if (!write) return { path, status: current == null ? 'missing' : 'stale' };
-  writeText(path, desired);
-  return { path, status: current == null ? 'added' : 'updated' };
+  const block = instructionBlock();
+  if (current == null) {
+    if (write) writeText(path, `${block}\n`);
+    return { path, status: write ? 'added' : 'missing' };
+  }
+  if (current.includes(BLOCK_START) && current.includes(BLOCK_END)) {
+    const next = current.replace(new RegExp(`${BLOCK_START.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${BLOCK_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), block);
+    if (next === current) return { path, status: 'unchanged' };
+    if (write) writeText(path, next);
+    return { path, status: write ? 'updated' : 'stale' };
+  }
+  return { path, status: 'conflict', message: 'existing instructions file left untouched' };
 }
 
 export function detectedHosts(home) {
@@ -465,6 +517,7 @@ function formatReport(host, report) {
 
 export function runMcpCli(argv, options = {}) {
   const env = options.env ?? process.env;
+  const execFile = options.execFile ?? ((command, args, opts) => execFileSync(command, args, opts));
   const lines = [];
   const args = [...argv];
   let operation = args.shift();
@@ -472,14 +525,17 @@ export function runMcpCli(argv, options = {}) {
   if (operation === 'update') operation = 'install';
   if (!['install', 'verify'].includes(operation)) throw new Error(`Unknown MCP operation: ${operation}`);
   let home = options.home ?? homedir();
+  let checkout;
   const hostNames = [];
   while (args.length) {
     const flag = args.shift();
     if (flag === '--home') home = args.shift();
     else if (flag === '--host') hostNames.push(args.shift());
+    else if (flag === '--checkout') checkout = args.shift();
     else throw new Error(`Unknown option: ${flag}`);
   }
   if (!home || !isAbsolute(home)) throw new Error('MCP home directory must be an absolute path.');
+  checkout = resolveCheckout(checkout, home);
   const write = operation === 'install';
   const hosts = hostNames.length
     ? hostNames.map(resolveHost)
@@ -491,28 +547,28 @@ export function runMcpCli(argv, options = {}) {
   }
   const allReports = [];
   for (const host of hosts) {
-    const plan = planHostMcp(host, home, env, { write });
-    if (write && plan.changed) writeText(plan.configPath, plan.nextText);
+    const plan = planHostMcp(host, home, env, { write, checkout, execFile });
+    if (write && host.kind === 'json' && plan.changed) writeJsonAtomic(plan.configPath, plan.nextText);
     for (const report of plan.reports) {
       lines.push(formatReport(host, report));
       allReports.push({ host: host.id, ...report });
     }
-    if (write || detectedHosts(home).some(item => item.id === host.id) || hostNames.length) {
-      const rule = applyRuleFile(host, home, { write });
-      lines.push(`MCP ${host.id} rule ${rule.status}`);
-      allReports.push({ host: host.id, name: 'rule', status: rule.status });
-    }
+    if (!host.instructionPath) continue;
+    if (!(write || detectedHosts(home).some(item => item.id === host.id) || hostNames.length)) continue;
+    const instruction = applyInstructionFile(join(home, host.instructionPath), { write });
+    lines.push(formatReport(host, { name: 'instructions', status: instruction.status, message: instruction.message }));
+    allReports.push({ host: host.id, name: 'instructions', status: instruction.status, message: instruction.message });
   }
   return { lines, reports: allReports };
 }
 
 function invokedDirectly() {
-  const self = fileURLToPath(import.meta.url);
-  if (!(self.endsWith('mcp-config.js') || self.endsWith('shiori-mcp.js'))) return false;
+  const self = fileURLToPath(import.meta.url).replaceAll('\\', '/');
+  if (self.endsWith('/dist/index.js') || self.endsWith('/src/main.js')) return false;
   const argv1 = process.argv[1];
   if (!argv1 || argv1 === '-') return true;
   try {
-    return self === resolve(argv1);
+    return self === resolve(argv1).replaceAll('\\', '/');
   } catch {
     return false;
   }

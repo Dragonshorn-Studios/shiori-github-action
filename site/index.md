@@ -12,7 +12,7 @@ Consult shiori-brain on demand (`search` / `read_doc`) before architecture or se
 
 ## MCP servers
 
-The generated doctor can add these MCP servers to Cursor (`~/.cursor/mcp.json`), Claude Code (`~/.claude.json`), and Codex (`~/.codex/config.toml`). Craft CLIs are added only when the executable is on `PATH`.
+The generated doctor can add these MCP servers to Cursor (`~/.cursor/mcp.json`), Claude Code (`claude mcp add -s user`), and Codex (`codex mcp add`). Craft CLIs are added only when the executable is on `PATH`. The shiori-brain server is launched from the managed checkout, not from a package registry.
 
 | Server | Command | Purpose | When added |
 | --- | --- | --- | --- |

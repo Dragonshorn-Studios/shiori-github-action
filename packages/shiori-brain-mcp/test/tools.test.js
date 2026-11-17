@@ -52,6 +52,21 @@ test('read_doc returns the raw markdown for an index id', async () => {
   assert.equal(document.title, 'Architecture & APIs');
 });
 
+test('knowledge client caches fetches in a plain Map', async () => {
+  let calls = 0;
+  const countingFetch = url => {
+    calls += 1;
+    return fetchImpl(url);
+  };
+  const knowledge = createKnowledgeClient({ baseUrl: 'https://example.test/shiori-brain/', fetchImpl: countingFetch });
+  await knowledge.search('architecture');
+  await knowledge.search('product');
+  assert.equal(calls, 1);
+  await knowledge.readDoc('root');
+  await knowledge.readDoc('root');
+  assert.equal(calls, 2);
+});
+
 test('read_doc refuses unknown ids and off-origin URLs', async () => {
   const knowledge = client();
   await assert.rejects(() => knowledge.readDoc('missing'), /Unknown document id/);

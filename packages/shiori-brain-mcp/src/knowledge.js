@@ -23,26 +23,13 @@ export function resolveDocUrl(baseUrl, entry) {
   return resolved;
 }
 
-function cacheKey(kind, href) {
-  return `${kind}:${href}`;
-}
-
-async function fetchText(url, { fetchImpl, cache, kind }) {
-  const key = cacheKey(kind, url.href);
+async function fetchText(url, { fetchImpl, cache }) {
+  const key = url.href;
   if (cache.has(key)) return cache.get(key);
-  const headers = { accept: kind === 'index' ? 'application/json, text/plain;q=0.9' : 'text/plain, text/markdown;q=0.9' };
-  const cachedMeta = cache.get(`${key}:meta`);
-  if (cachedMeta?.etag) headers['if-none-match'] = cachedMeta.etag;
-  if (cachedMeta?.lastModified) headers['if-modified-since'] = cachedMeta.lastModified;
-  const response = await fetchImpl(url, { headers });
-  if (response.status === 304 && cache.has(key)) return cache.get(key);
+  const response = await fetchImpl(url);
   if (!response.ok) throw new Error(`Unable to fetch ${url.href} (${response.status}).`);
   const text = await response.text();
   cache.set(key, text);
-  cache.set(`${key}:meta`, {
-    etag: response.headers.get('etag') || undefined,
-    lastModified: response.headers.get('last-modified') || undefined
-  });
   return text;
 }
 
@@ -100,7 +87,7 @@ export function createKnowledgeClient({ baseUrl = DEFAULT_BASE_URL, fetchImpl = 
 
   async function loadIndex() {
     if (!documentsPromise) {
-      documentsPromise = fetchText(resolveIndexUrl(resolvedBase), { fetchImpl, cache, kind: 'index' })
+      documentsPromise = fetchText(resolveIndexUrl(resolvedBase), { fetchImpl, cache })
         .then(text => normalizeDocuments(JSON.parse(text)))
         .catch(error => {
           documentsPromise = undefined;
@@ -119,7 +106,7 @@ export function createKnowledgeClient({ baseUrl = DEFAULT_BASE_URL, fetchImpl = 
       const documents = await loadIndex();
       const entry = documents.find(document => document.id === id);
       if (!entry) throw new Error(`Unknown document id: ${id}`);
-      const markdown = await fetchText(resolveDocUrl(resolvedBase, entry), { fetchImpl, cache, kind: 'doc' });
+      const markdown = await fetchText(resolveDocUrl(resolvedBase, entry), { fetchImpl, cache });
       return { ...entry, markdown };
     }
   };

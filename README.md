@@ -184,7 +184,7 @@ Following the cross-agent layout used by [`Rughalt/coding-agent-plugins`](https:
 
 Shiori also generates `AGENT-SETUP.md` and read-only `scripts/shiori-doctor.sh` / `scripts/shiori-doctor.ps1` helpers. They detect local CLIs and configuration directories, distinguish cloud-capable hosts such as Devin, and report whether Shiori is installed whenever a reliable non-interactive local check exists. Codex and Claude status uses the doctor's own successful-install record so a read-only run never launches either client. Hosts without a safe check are marked `unknown` instead of being guessed. The same generation pass emits a portable Agent Plugins `plugins/shiori/plugin.json` and a Codex-native `.agents/plugins/marketplace.json`; `.codex-plugin/plugin.json` remains as a compatibility fallback.
 
-Default doctor mode never writes home-directory configuration. Under explicit `--install` / `--update` for Cursor, Claude Code, and Codex, the doctor also adds a local stdio MCP entry for [`shiori-brain-mcp`](packages/shiori-brain-mcp) (`npx -y shiori-brain-mcp`) plus Storytold Craft CLIs that are already on `PATH` (`<name>-cli mcp`). Existing non-Shiori MCP entries are left untouched. `--install cursor` writes only MCP config and a one-line rule hint; it does not install the Cursor plugin.
+Default doctor mode never writes home-directory configuration. Under explicit `--install` / `--update` for Cursor, Claude Code, and Codex, the doctor also adds a local stdio MCP entry for [`shiori-brain-mcp`](packages/shiori-brain-mcp) (`node ~/.local/share/shiori/shiori-brain/packages/shiori-brain-mcp/src/index.js`) plus Storytold Craft CLIs that are already on `PATH` (`<name>-cli mcp`). Cursor is written through `~/.cursor/mcp.json`; Claude Code and Codex are registered through `claude mcp add -s user` and `codex mcp add`. Existing non-Shiori MCP entries are left untouched. `--install cursor` writes only MCP config; it does not install the Cursor plugin.
 
 The generated guide includes `curl | sh` and PowerShell `irm | iex` entry points, so the doctor can run without cloning the generated knowledge repository. Remote mode performs detection only and recommends repository-backed marketplace installation; it never assumes project adapters exist in the current directory.
 
@@ -276,7 +276,7 @@ Copy [`examples/pages.yml`](examples/pages.yml) to `.github/workflows/pages.yml`
 [`packages/shiori-brain-mcp`](packages/shiori-brain-mcp) is a small read-only stdio MCP server. It fetches `index.json` and raw Markdown from the Pages site and exposes `search` and `read_doc`. Configure the archive origin with `SHIORI_BRAIN_BASE_URL` or `--base-url` (default `https://dragonshorn-studios.github.io/shiori-brain/`). There are no secrets, tokens, or write tools.
 
 ```bash
-npx -y shiori-brain-mcp --base-url https://dragonshorn-studios.github.io/shiori-brain/
+node ~/.local/share/shiori/shiori-brain/packages/shiori-brain-mcp/src/index.js --base-url https://dragonshorn-studios.github.io/shiori-brain/
 ```
 
 ## Local development
