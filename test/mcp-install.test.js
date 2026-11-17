@@ -338,6 +338,83 @@ test('runMcpCli install writes cursor JSON atomically with a backup and does not
   assert.ok(second.reports.some(item => item.name === 'figcraft' && item.status === 'unchanged'));
 });
 
+test('runMcpCli install writes Devin user-scope MCP config', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  await mkdir(join(home, '.config/devin'), { recursive: true });
+  const { reports } = runMcpCli(['install', '--home', home, '--host', 'devin'], {
+    env: withArchive({ ...process.env, PATH: '/missing-bin' })
+  });
+  const config = JSON.parse(await readFile(join(home, '.config/devin/mcp_config.json'), 'utf8'));
+  assert.equal(config.mcpServers['shiori-brain'].command, 'node');
+  assert.deepEqual(config.mcpServers['shiori-brain'].args, shioriFor(home).args);
+  assert.equal(config.mcpServers['shiori-brain'].env[ARCHIVE_ENV], ARCHIVE_URL);
+  assert.ok(reports.some(item => item.name === 'shiori-brain' && item.status === 'added'));
+
+  const second = runMcpCli(['install', '--home', home, '--host', 'devin'], {
+    env: withArchive({ ...process.env, PATH: '/missing-bin' })
+  });
+  assert.ok(second.reports.some(item => item.name === 'shiori-brain' && item.status === 'unchanged'));
+});
+
+test('runMcpCli install writes OpenCode mcp.servers entries in the local schema', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  await mkdir(join(home, '.config/opencode'), { recursive: true });
+  const { reports } = runMcpCli(['install', '--home', home, '--host', 'opencode'], {
+    env: withArchive({ ...process.env, PATH: '/missing-bin' })
+  });
+  const config = JSON.parse(await readFile(join(home, '.config/opencode/opencode.json'), 'utf8'));
+  const shiori = config.mcp.servers['shiori-brain'];
+  assert.equal(shiori.type, 'local');
+  assert.deepEqual(shiori.command, ['node', ...shioriFor(home).args]);
+  assert.equal(shiori.environment[ARCHIVE_ENV], ARCHIVE_URL);
+  assert.equal(config.mcp.servers.figcraft, undefined);
+  assert.equal(config.mcpServers, undefined);
+  assert.ok(reports.some(item => item.name === 'shiori-brain' && item.status === 'added'));
+
+  const second = runMcpCli(['install', '--home', home, '--host', 'opencode'], {
+    env: withArchive({ ...process.env, PATH: '/missing-bin' })
+  });
+  assert.ok(second.reports.some(item => item.name === 'shiori-brain' && item.status === 'unchanged'));
+});
+
+test('runMcpCli prefers an existing opencode.jsonc and preserves other keys', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  await mkdir(join(home, '.config/opencode'), { recursive: true });
+  await writeFile(join(home, '.config/opencode/opencode.jsonc'), `${JSON.stringify({
+    model: 'anthropic/claude-sonnet-5-5',
+    mcp: { servers: { other: { type: 'local', command: ['other-cmd'] } } }
+  }, null, 2)}\n`);
+  const { reports } = runMcpCli(['install', '--home', home, '--host', 'opencode'], {
+    env: withArchive({ ...process.env, PATH: '/missing-bin' })
+  });
+  assert.equal(existsSync(join(home, '.config/opencode/opencode.json')), false);
+  const config = JSON.parse(await readFile(join(home, '.config/opencode/opencode.jsonc'), 'utf8'));
+  assert.equal(config.model, 'anthropic/claude-sonnet-5-5');
+  assert.deepEqual(config.mcp.servers.other, { type: 'local', command: ['other-cmd'] });
+  assert.equal(config.mcp.servers['shiori-brain'].type, 'local');
+  assert.ok(reports.some(item => item.name === 'shiori-brain' && item.status === 'added'));
+});
+
+test('OpenCode shape classifies foreign, stale, and matching entries like other hosts', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const shiori = shioriFor(home);
+  const existing = JSON.stringify({
+    mcp: {
+      servers: {
+        'shiori-brain': { type: 'local', command: ['node', '/old/packages/shiori-brain-mcp/src/index.js'], disabled: true },
+        figcraft: { type: 'remote', url: 'https://figcraft.example/mcp' }
+      }
+    }
+  });
+  const result = applyJsonMcpConfig(existing, [shiori, figcraft], 'opencode');
+  assert.deepEqual(result.reports.map(item => item.status), ['updated', 'conflict']);
+  const parsed = JSON.parse(result.text);
+  assert.equal(parsed.mcp.servers['shiori-brain'].disabled, true);
+  assert.deepEqual(parsed.mcp.servers['shiori-brain'].command, ['node', ...shiori.args]);
+  assert.equal(parsed.mcp.servers['shiori-brain'].environment[ARCHIVE_ENV], ARCHIVE_URL);
+  assert.deepEqual(parsed.mcp.servers.figcraft, { type: 'remote', url: 'https://figcraft.example/mcp' });
+});
+
 test('runMcpCli reports a conflicting JSON craft entry instead of overwriting it', async () => {
   const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
   const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
@@ -709,4 +786,24 @@ test('generated doctor --install cursor writes MCP config using the shared helpe
   assert.match(setup, /figcraft-cli mcp/);
   assert.match(setup, /Consult shiori-brain on demand/);
   assert.doesNotMatch(setup, /npx -y shiori-brain-mcp/);
+});
+
+test('generated doctor --install devin writes MCP config using the shared helper', async () => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-doctor-'));
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const files = installSupportFiles({ repository: 'example/project', marketplaceName: 'project-knowledge' });
+  for (const [path, content] of files) {
+    await mkdir(join(repositoryRoot, dirname(path)), { recursive: true });
+    await writeFile(join(repositoryRoot, path), content, path.endsWith('.sh') ? { mode: 0o755 } : undefined);
+  }
+  execFileSync('sh', ['scripts/shiori-doctor.sh', '--install', 'devin'], {
+    cwd: repositoryRoot,
+    env: { ...withArchive(process.env), HOME: home, SHIORI_CHECKOUT: repositoryRoot }
+  });
+  const config = JSON.parse(await readFile(join(home, '.config/devin/mcp_config.json'), 'utf8'));
+  assert.equal(config.mcpServers['shiori-brain'].command, 'node');
+  assert.equal(config.mcpServers['shiori-brain'].args[0], join(repositoryRoot, 'packages/shiori-brain-mcp/src/index.js'));
+  assert.equal(config.mcpServers['shiori-brain'].env[ARCHIVE_ENV], 'https://example.github.io/project/');
+  const recorded = await readFile(join(home, '.local/state/shiori/installed-hosts'), 'utf8');
+  assert.match(recorded, /^devin$/m);
 });
