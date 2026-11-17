@@ -49,7 +49,7 @@ export const MCP_HOSTS = {
     kind: 'json',
     jsonShape: 'opencode',
     detectPath: '.config/opencode',
-    configPath: '.config/opencode/opencode.json',
+    configPath: '.config/opencode/opencode.jsonc',
     configCandidates: ['.config/opencode/opencode.json', '.config/opencode/opencode.jsonc'],
     instructionPath: null
   },

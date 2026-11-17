@@ -356,13 +356,14 @@ test('runMcpCli install writes Devin user-scope MCP config', async () => {
   assert.ok(second.reports.some(item => item.name === 'shiori-brain' && item.status === 'unchanged'));
 });
 
-test('runMcpCli install writes OpenCode mcp.servers entries in the local schema', async () => {
+test('runMcpCli install writes OpenCode mcp.servers entries to opencode.jsonc', async () => {
   const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
   await mkdir(join(home, '.config/opencode'), { recursive: true });
   const { reports } = runMcpCli(['install', '--home', home, '--host', 'opencode'], {
     env: withArchive({ ...process.env, PATH: '/missing-bin' })
   });
-  const config = JSON.parse(await readFile(join(home, '.config/opencode/opencode.json'), 'utf8'));
+  assert.equal(existsSync(join(home, '.config/opencode/opencode.json')), false);
+  const config = JSON.parse(await readFile(join(home, '.config/opencode/opencode.jsonc'), 'utf8'));
   const shiori = config.mcp.servers['shiori-brain'];
   assert.equal(shiori.type, 'local');
   assert.deepEqual(shiori.command, ['node', ...shioriFor(home).args]);
@@ -377,18 +378,18 @@ test('runMcpCli install writes OpenCode mcp.servers entries in the local schema'
   assert.ok(second.reports.some(item => item.name === 'shiori-brain' && item.status === 'unchanged'));
 });
 
-test('runMcpCli prefers an existing opencode.jsonc and preserves other keys', async () => {
+test('runMcpCli updates an existing opencode.json in place and preserves other keys', async () => {
   const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
   await mkdir(join(home, '.config/opencode'), { recursive: true });
-  await writeFile(join(home, '.config/opencode/opencode.jsonc'), `${JSON.stringify({
+  await writeFile(join(home, '.config/opencode/opencode.json'), `${JSON.stringify({
     model: 'anthropic/claude-sonnet-5-5',
     mcp: { servers: { other: { type: 'local', command: ['other-cmd'] } } }
   }, null, 2)}\n`);
   const { reports } = runMcpCli(['install', '--home', home, '--host', 'opencode'], {
     env: withArchive({ ...process.env, PATH: '/missing-bin' })
   });
-  assert.equal(existsSync(join(home, '.config/opencode/opencode.json')), false);
-  const config = JSON.parse(await readFile(join(home, '.config/opencode/opencode.jsonc'), 'utf8'));
+  assert.equal(existsSync(join(home, '.config/opencode/opencode.jsonc')), false);
+  const config = JSON.parse(await readFile(join(home, '.config/opencode/opencode.json'), 'utf8'));
   assert.equal(config.model, 'anthropic/claude-sonnet-5-5');
   assert.deepEqual(config.mcp.servers.other, { type: 'local', command: ['other-cmd'] });
   assert.equal(config.mcp.servers['shiori-brain'].type, 'local');

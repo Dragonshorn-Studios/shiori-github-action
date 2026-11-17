@@ -76,7 +76,7 @@ Valid host names: \`opencode\`, \`mcode\`, \`vibe\`, \`codex\`, \`claude\` (or \
 
 | Host | \`--install\` effect |
 | --- | --- |
-| opencode | Managed checkout + Agent Skills links + MCP config in \`~/.config/opencode/opencode.json\` |
+| opencode | Managed checkout + Agent Skills links + MCP config in \`~/.config/opencode/opencode.jsonc\` |
 | mcode, vibe | Managed checkout + Agent Skills links |
 | codex | Plugin marketplace + plugin + MCP via \`codex mcp add\` |
 | claude | Plugin marketplace + plugin + MCP via \`claude mcp add -s user\` |
@@ -101,7 +101,7 @@ Pass names after \`--update\`, or use PowerShell \`-Update -UpdateTargets openco
 
 | Host | Project use | Native reusable installation |
 | --- | --- | --- |
-| OpenCode | Automatic through \`.agents/skills\` | \`--install opencode\` uses the managed checkout and global Agent Skills links, and writes MCP config to \`~/.config/opencode/opencode.json\`. |
+| OpenCode | Automatic through \`.agents/skills\` | \`--install opencode\` uses the managed checkout and global Agent Skills links, and writes MCP config to \`~/.config/opencode/opencode.jsonc\`. |
 | Codex / ChatGPT desktop | Repository skills work through \`.agents/skills\` | Run \`codex plugin marketplace add ${repository}\`, then open \`/plugins\` and install **Shiori**. |
 | Claude Code | Automatic through \`.claude/skills\` and \`.claude/agents\` | Run \`/plugin marketplace add ${repository}\`, then \`/plugin install shiori@${marketplace}\`. |
 | ZCode | Install the generated plugin | Open **Settings -> Plugins -> Create -> Add marketplace**, enter \`${repository}\`, then install **Shiori**. |
@@ -113,7 +113,7 @@ Pass names after \`--update\`, or use PowerShell \`-Update -UpdateTargets openco
 
 ## MCP servers
 
-The doctor can add a local stdio MCP client for the published Pages archive, plus Storytold Craft CLIs that are already on \`PATH\`. Default doctor mode is still read-only and does not launch Claude or Codex. MCP writes happen only under \`--install\` / \`--update\`: Cursor via \`~/.cursor/mcp.json\`, Devin via \`~/.config/devin/mcp_config.json\`, OpenCode via \`~/.config/opencode/opencode.json\` (\`mcp.servers\`; an existing \`opencode.jsonc\` is used instead when present), Claude Code via \`claude mcp add -s user\`, and Codex via \`codex mcp add\`. The shiori-brain server is \`node <checkout>/packages/shiori-brain-mcp/src/index.js\` from the managed checkout; it is not loaded from a package registry. Installed entries set \`SHIORI_BRAIN_BASE_URL\` to this project's Pages origin (\`${archiveUrl || 'https://<owner>.github.io/<repo>/'}\`). Override with \`SHIORI_BRAIN_BASE_URL\` if Pages uses a custom domain. The installer fails instead of using another project's archive when that URL cannot be determined. Existing non-Shiori MCP entries are never overwritten.
+The doctor can add a local stdio MCP client for the published Pages archive, plus Storytold Craft CLIs that are already on \`PATH\`. Default doctor mode is still read-only and does not launch Claude or Codex. MCP writes happen only under \`--install\` / \`--update\`: Cursor via \`~/.cursor/mcp.json\`, Devin via \`~/.config/devin/mcp_config.json\`, OpenCode via \`~/.config/opencode/opencode.jsonc\` (\`mcp.servers\`; an existing \`opencode.json\` is updated in place instead. Fresh installs choose \`.jsonc\` so other tools' flat-schema OpenCode imports do not misread the file), Claude Code via \`claude mcp add -s user\`, and Codex via \`codex mcp add\`. The shiori-brain server is \`node <checkout>/packages/shiori-brain-mcp/src/index.js\` from the managed checkout; it is not loaded from a package registry. Installed entries set \`SHIORI_BRAIN_BASE_URL\` to this project's Pages origin (\`${archiveUrl || 'https://<owner>.github.io/<repo>/'}\`). Override with \`SHIORI_BRAIN_BASE_URL\` if Pages uses a custom domain. The installer fails instead of using another project's archive when that URL cannot be determined. Existing non-Shiori MCP entries are never overwritten.
 
 ${renderMcpMarkdownTable()}
 Consult shiori-brain on demand (\`search\` / \`read_doc\`) before architecture or security decisions; do not dump that knowledge into context. Skills are procedures only.
