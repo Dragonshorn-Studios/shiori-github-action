@@ -186,6 +186,9 @@ function shArgs(operation) {
 }
 
 function psArgs(operation) {
+  if (operation.install === true || (Array.isArray(operation.install) && operation.install.length === 0)) {
+    return ['-Install', 'all'];
+  }
   if (operation.install) return ['-Install', operation.install.join(',')];
   if (operation.update === true) return ['-Update'];
   if (Array.isArray(operation.update)) return ['-Update', '-UpdateTargets', operation.update.join(',')];

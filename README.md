@@ -188,7 +188,7 @@ Default doctor mode never writes home-directory configuration. Under explicit `-
 
 The generated guide includes `curl | sh` and PowerShell `irm | iex` entry points, so the doctor can run without cloning the generated knowledge repository. Remote mode performs detection only and recommends repository-backed marketplace installation; it never assumes project adapters exist in the current directory.
 
-Explicit install mode maintains one Shiori checkout and exposes its skills through `~/.agents/skills` or `~/.claude/skills`. It records successful host selections so a later update needs no host list. Checkout updates require the expected origin, a clean tree, and a fast-forward; skill synchronization manages only links previously created by Shiori and skips foreign same-name entries with a warning.
+`--install` / `--update` with no host names set up every locally detected installable host. An explicit host list still takes precedence. Successful hosts are recorded in `installed-hosts` so a later named update still works. Checkout updates require the expected origin, a clean tree, and a fast-forward; skill synchronization manages only links previously created by Shiori and skips foreign same-name entries with a warning.
 
 [ZCode](https://zcode.z.ai/en/docs/plugin) is a separate coding-agent product, not another name for Windsurf. Shiori serves ZCode through the generated plugin marketplace: ZCode prefers `.zcode-plugin/plugin.json` but explicitly accepts the generated Claude-compatible `.claude-plugin/plugin.json` fallback.
 

@@ -337,6 +337,9 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(shellDoctor, /run_mcp_cli install --host opencode/);
   assert.match(shellDoctor, /mcp_configured/);
   assert.match(shellDoctor, /host_detected/);
+  assert.match(shellDoctor, /select_detected_hosts/);
+  assert.match(shellDoctor, /No installable hosts detected/);
+  assert.doesNotMatch(shellDoctor, /Pass at least one installer/);
   assert.doesNotMatch(shellDoctor, /run_mcp_cli verify/);
   assert.match(shellDoctor, /--base-url/);
   assert.match(shellDoctor, /https:\/\/example\.github\.io\/project\//);
@@ -364,6 +367,8 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(powerShellDoctor, /Invoke-McpCli -McpArgs @\('install', '--host', 'opencode'\)/);
   assert.match(powerShellDoctor, /Test-McpConfigured/);
   assert.match(powerShellDoctor, /Test-HostDetected/);
+  assert.match(powerShellDoctor, /No installable hosts detected/);
+  assert.doesNotMatch(powerShellDoctor, /Pass at least one installer/);
   assert.doesNotMatch(powerShellDoctor, /Invoke-McpCli -McpArgs @\('verify'\)/);
   assert.match(powerShellDoctor, /--base-url \$ArchiveUrl/);
   assert.match(powerShellDoctor, /A read-only run does not launch host CLIs/);

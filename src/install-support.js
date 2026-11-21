@@ -398,10 +398,6 @@ function shellInstallCases() {
 function shellAssertCases() {
   return installableDoctorHosts().map(host => {
     const lines = [`    ${hostCasePattern(host)})`];
-    if (host.skipWindows) {
-      lines.push('      ;;');
-      return lines.join('\n');
-    }
     if (host.skillsDest) {
       lines.push('      has_command git && has_command ln && has_command readlink && has_command rm && has_command mkdir && has_command mv || { printf \'%s\\n\' \'Cannot install shared skills: git, ln, readlink, rm, mkdir, and mv are required. On Windows use the PowerShell installer.\' >&2; return 1; }');
     }
@@ -616,7 +612,7 @@ The doctor is read-only. It does not edit home-directory configuration or instal
 
 ## Install from the command line
 
-Only explicitly selected hosts are changed. Hosts that already read \`~/.agents/skills\` with full skill functionality share one managed checkout at \`~/.local/share/shiori/shiori-brain\` and receive individual links in \`~/.agents/skills/<name>\`. Claude Code uses the same checkout linked into \`~/.claude/skills/<name>\`. Two hosts that share a destination never get two copies. The doctor does not install Codex or Claude plugins; those remain published in the repository marketplace as a separate channel (ChatGPT web and manual installs). Cursor, Devin, OpenCode, Claude Code, and Codex also receive MCP config under \`--install\` / \`--update\`:
+\`--install\` or \`--update\` with no host names sets up every locally detected installable host. An explicit host list still takes precedence over detection. Hosts that already read \`~/.agents/skills\` with full skill functionality share one managed checkout at \`~/.local/share/shiori/shiori-brain\` and receive individual links in \`~/.agents/skills/<name>\`. Claude Code uses the same checkout linked into \`~/.claude/skills/<name>\`. Two hosts that share a destination never get two copies. The doctor does not install Codex or Claude plugins; those remain published in the repository marketplace as a separate channel (ChatGPT web and manual installs). Cursor, Devin, OpenCode, Claude Code, and Codex also receive MCP config under \`--install\` / \`--update\`. Devin is detected only when the \`devin\` CLI is on \`PATH\` or \`~/.config/devin\` / \`~/.devin\` exists; cloud-capable status alone is not enough:
 
 \`\`\`bash
 curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | sh -s -- --install ${exampleHosts}
@@ -626,7 +622,7 @@ curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | sh -s -- --install ${exampleHos
 $env:SHIORI_INSTALL='${installableDoctorHostsInCliOrder().map(host => host.id).join(',')}'; irm ${rawBase}/scripts/shiori-doctor.ps1 | iex
 \`\`\`
 
-For a checked-out script, use \`sh scripts/shiori-doctor.sh --install opencode mcode vibe\` or \`.\\scripts\\shiori-doctor.ps1 -Install opencode,mcode,vibe\`. Re-running install fast-forwards the managed checkout and reconciles skill links. Existing non-Shiori skill destinations are skipped with a warning and never overwritten.
+For a checked-out script, use \`sh scripts/shiori-doctor.sh --install\` to set up every detected host, or \`sh scripts/shiori-doctor.sh --install opencode mcode vibe\` / \`.\\scripts\\shiori-doctor.ps1 -Install opencode,mcode,vibe\` to name hosts. Re-running install fast-forwards the managed checkout and reconciles skill links. Existing non-Shiori skill destinations are skipped with a warning and never overwritten. A host that is not detected is not created.
 
 Valid host names: ${installableDoctorHostsInCliOrder().map(host => `\`${host.id}\``).join(', ').replace(/, ([^,]*)$/, ', and $1')}${installableDoctorHosts().some(host => host.aliases.includes('claude-code')) ? ' (`claude-code` is accepted as `claude`)' : ''}. What each one does:
 
@@ -634,7 +630,7 @@ ${renderInstallEffectTable()}
 
 ## Update installed hosts
 
-\`--install\` records each host it successfully sets up in \`~/.local/state/shiori/installed-hosts\`. \`--update\` re-runs the current doctor against those recorded hosts, including capabilities added after the original install. For example, a host installed before MCP support existed receives its MCP config on the next update. Update all recorded hosts without remembering the list:
+\`--install\` records each host it successfully sets up in \`~/.local/state/shiori/installed-hosts\`. A named \`--update\` still re-runs the current doctor against those recorded hosts. A bare \`--update\` (or \`SHIORI_UPDATE=all\`) sets up every host the doctor currently detects, including tools that were never recorded. Recorded-but-no-longer-detected hosts are not required. If a detected host cannot be installed, the doctor warns, continues with the rest, and exits non-zero:
 
 \`\`\`bash
 curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | sh -s -- --update
@@ -644,7 +640,7 @@ curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | sh -s -- --update
 $env:SHIORI_UPDATE='all'; irm ${rawBase}/scripts/shiori-doctor.ps1 | iex
 \`\`\`
 
-Pass names after \`--update\`, or use PowerShell \`-Update -UpdateTargets opencode,mcode\`, to update only selected hosts. A bare \`--update\` also prints locally detected hosts that were never recorded, so newly installed tools are easy to pick up. Checkout updates are always \`git pull --ff-only\`; an unexpected origin, dirty checkout, non-repository path, or skills directory symlink leaving \`\$HOME\` stops the operation rather than deleting user data. A second consecutive \`--update\` with no checkout change reports \`already current\` and writes nothing.
+Pass names after \`--install\` / \`--update\`, or use PowerShell \`-Install opencode\` / \`-Update -UpdateTargets opencode,mcode\`, to change only selected hosts. A bare run with no \`--install\` / \`--update\` stays read-only. Checkout updates are always \`git pull --ff-only\`; an unexpected origin, dirty checkout, non-repository path, or skills directory symlink leaving \`\$HOME\` stops the operation rather than deleting user data. A second consecutive \`--update\` with no checkout change reports \`already current\` and writes nothing. If nothing installable is detected, the doctor prints an error on stderr and writes nothing.
 
 ## Native setup matrix
 
@@ -936,20 +932,20 @@ for selected_target in $selected_targets; do
   normalized_targets=\"$normalized_targets $selected_target\"
 done
 selected_targets=\${normalized_targets# }
-if [ \"$operation\" = 'install' ] && [ -z \"$selected_targets\" ]; then
-  printf '%s\\n' 'Pass at least one installer: ${names}.' >&2
-  exit 2
-fi
-if [ \"$operation\" = 'update' ] && [ -z \"$selected_targets\" ]; then
-  [ -f \"$installed_hosts_file\" ] || { printf '%s\\n' 'No recorded Shiori installations to update.' >&2; exit 2; }
-  while IFS= read -r recorded_host; do selected_targets=\"$selected_targets $recorded_host\"; done < \"$installed_hosts_file\"
-  detected_hints=''
-  for candidate in ${installableDoctorHosts().map(host => host.id).join(' ')}; do
-    case \" $selected_targets \" in *\" $candidate \"*) continue ;; esac
-    host_is_recorded \"$candidate\" && continue
-    host_detected \"$candidate\" && detected_hints=\"$detected_hints $candidate\"
-  done
-  [ -z \"$detected_hints\" ] || printf 'Detected locally but not recorded:%s - pass them to --install or --update to enable their features.\\n' \"$detected_hints\"
+case $selected_targets in
+  all|1|true) selected_targets='' ;;
+esac
+select_detected_hosts() {
+  selected_targets=''
+${installableDoctorHostsInCliOrder().map(host => `    host_detected ${host.id} && selected_targets=\"$selected_targets ${host.id}\"`).join('\n')}
+  selected_targets=\${selected_targets# }
+}
+if [ -n \"$operation\" ] && [ -z \"$selected_targets\" ]; then
+  select_detected_hosts
+  if [ -z \"$selected_targets\" ]; then
+    printf '%s\\n' 'No installable hosts detected. Pass a host name to --install / --update: ${names}.' >&2
+    exit 2
+  fi
 fi
 assert_installer() {
   case $1 in
@@ -1041,9 +1037,9 @@ printf '%s\\n' '' 'MCP servers' '  Installed under --install / --update for curs
 printf '%s\\n' \\
   '' \\
   'How --install and --update work' \\
-  '  --install <hosts>  set up the named hosts now. Valid names: ${installableDoctorHostsInCliOrder().map(host => host.id).join(', ')}.' \\
-  '  --update [hosts]   re-run the installer for every host recorded by an earlier --install, or only the named' \\
-  '                     hosts. Capabilities added by a newer doctor (for example MCP config) are applied on update.' \\
+  '  --install [hosts]  set up the named hosts, or every locally detected host if none are named. Valid names: ${installableDoctorHostsInCliOrder().map(host => host.id).join(', ')}.' \\
+  '  --update [hosts]   re-run the installer for the named hosts, or every currently detected host if none are named.' \\
+  '                     Recorded-but-missing hosts are not required. Capabilities added by a newer doctor are applied on update.' \\
   '  Host names may be space- or comma-separated; SHIORI_INSTALL / SHIORI_UPDATE are the pipe equivalents.' \\
   '' \\
   'Recommended native setup' \\
@@ -1061,8 +1057,22 @@ if [ -n \"$operation\" ]; then
   mcp_selected='false'
   warn_codex_plugin='false'
   warn_claude_plugin='false'
+  install_failed='false'
+  usable_targets=''
   for selected_target in $selected_targets; do
-    assert_installer \"$selected_target\"
+    if assert_installer \"$selected_target\"; then
+      usable_targets=\"$usable_targets $selected_target\"
+    else
+      printf 'Warning: cannot install %s; continuing with remaining hosts.\\n' \"$selected_target\" >&2
+      install_failed='true'
+    fi
+  done
+  selected_targets=\${usable_targets# }
+  if [ -z \"$selected_targets\" ]; then
+    printf '%s\\n' 'No remaining hosts could be installed.' >&2
+    exit 1
+  fi
+  for selected_target in $selected_targets; do
     case $selected_target in
 ${shellSkillsDestCases()}
     esac
@@ -1104,6 +1114,9 @@ ${shellInstallCases()}
     printf 'already current\\n'
   fi
   IFS=$previous_ifs
+  if [ \"$install_failed\" = true ]; then
+    exit 1
+  fi
 fi
 `;
 }
@@ -1472,10 +1485,9 @@ Write-Host '  Installed under -Install / -Update for cursor, devin, opencode, cl
 Write-Host @"
 
 How -Install and -Update work
-  -Install <hosts>  set up the named hosts now. Valid names: ${installableDoctorHostsInCliOrder().map(host => host.id).join(', ')}.
-  -Update [hosts]   re-run the installer for every host recorded by an earlier -Install, or only the hosts
-                    passed through -UpdateTargets or SHIORI_UPDATE. Capabilities added by a newer doctor
-                    (for example MCP config) are applied on update.
+  -Install [hosts]  set up the named hosts, or every locally detected host if none are named (use -Install all). Valid names: ${installableDoctorHostsInCliOrder().map(host => host.id).join(', ')}.
+  -Update [hosts]   re-run the installer for the named hosts, or every currently detected host if none are named.
+                    Recorded-but-missing hosts are not required. Capabilities added by a newer doctor are applied on update.
   Host names may be comma- or space-separated; SHIORI_INSTALL / SHIORI_UPDATE are the pipe equivalents.
 
 Recommended native setup
@@ -1497,19 +1509,10 @@ if ($env:SHIORI_UPDATE) { $Update = $true }
 if ($Install.Count -gt 0 -and $Update) { throw 'Choose either install or update.' }
 $Operation = if ($Update) { 'update' } elseif ($Install.Count -gt 0) { 'install' } else { '' }
 $Targets = if ($Operation -eq 'update') { @($UpdateTargets + $EnvironmentUpdate) } else { @($Install) }
-$UpdateFromRecorded = $false
-if ($Operation -eq 'update' -and $Targets.Count -eq 0) {
-    if (-not (Test-Path -LiteralPath $InstalledHostsFile)) { throw 'No recorded Shiori installations to update.' }
-    $Targets = @(Get-RecordedHostNames)
-    $UpdateFromRecorded = $true
-}
-$Targets = @(Split-HostNames $Targets | ForEach-Object { $_.ToLowerInvariant() } | ForEach-Object { Get-CanonicalHost $_ } | Select-Object -Unique)
-if ($Operation -eq 'install' -and $Targets.Count -eq 0) { throw 'Pass at least one installer: ${names}.' }
-if ($UpdateFromRecorded) {
-    $DetectedHints = @(${installableDoctorHosts().map(host => `'${host.id}'`).join(', ')}) | Where-Object {
-        ($_ -notin $Targets) -and -not (Test-RecordedHost $_) -and (Test-HostDetected $_)
-    }
-    if ($DetectedHints.Count -gt 0) { Write-Host \"Detected locally but not recorded: $($DetectedHints -join ', ') - pass them to -Install or -Update to enable their features.\" }
+$Targets = @(Split-HostNames $Targets | ForEach-Object { $_.ToLowerInvariant() } | Where-Object { $_ -ne 'all' } | ForEach-Object { Get-CanonicalHost $_ } | Select-Object -Unique)
+if ($Operation -and $Targets.Count -eq 0) {
+    $Targets = @(${installableDoctorHostsInCliOrder().map(host => `'${host.id}'`).join(', ')}) | Where-Object { Test-HostDetected $_ }
+    if ($Targets.Count -eq 0) { throw 'No installable hosts detected. Pass a host name to -Install / -Update: ${names}.' }
 }
 if ($Operation) {
     Assert-Home
@@ -1524,7 +1527,20 @@ if ($Operation) {
     }
     $Targets = $KeptTargets
     if ($Targets.Count -eq 0) { return }
-    foreach ($Target in $Targets) { Assert-PluginInstaller $Target }
+    $InstallFailed = $false
+    $UsableTargets = @()
+    foreach ($Target in $Targets) {
+        try {
+            Assert-PluginInstaller $Target
+            $UsableTargets += $Target
+        } catch {
+            [Console]::Error.WriteLine(\"Warning: cannot install $Target; continuing with remaining hosts.\")
+            [Console]::Error.WriteLine($_.Exception.Message)
+            $InstallFailed = $true
+        }
+    }
+    $Targets = $UsableTargets
+    if ($Targets.Count -eq 0) { throw 'No remaining hosts could be installed.' }
     Write-Host ''
     Write-Host \"Selected operation: $Operation\"
     $AgentsSkillsSelected = @($Targets | Where-Object { $_ -in @(${agentsList}) }).Count -gt 0
@@ -1556,6 +1572,7 @@ ${psInstallSwitch()}
     if (-not $script:CheckoutChanged -and -not $script:SkillsChanged) {
         Write-Host 'already current'
     }
+    if ($InstallFailed) { throw 'One or more hosts could not be installed.' }
 }
 `;
 }
