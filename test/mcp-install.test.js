@@ -7,6 +7,15 @@ import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { installSupportFiles } from '../src/install-support.js';
 import {
+  ARCHIVE_URL as DOCTOR_ARCHIVE_URL,
+  baseDoctorEnv,
+  isWindows,
+  makeUpstreamRepo,
+  runDoctor,
+  writeDoctorTree,
+  writeFakeGit
+} from './doctor-fixtures.js';
+import {
   ARCHIVE_ENV,
   CRAFT_APPS,
   applyInstructionFile,
@@ -504,8 +513,10 @@ test('githubPagesUrl derives the published Pages origin', () => {
   assert.equal(githubPagesUrl('Acme/acme.github.io'), 'https://acme.github.io/');
   assert.equal(githubPagesUrl('Acme/Acme.github.io'), 'https://acme.github.io/');
   assert.equal(githubPagesUrl(''), '');
-  for (const repository of ['example/project', 'example/Project', 'Dragonshorn-Studios/shiori-brain', 'Acme/acme.github.io', 'Acme/Acme.github.io', '']) {
-    assert.equal(shellArchiveUrl(repository), githubPagesUrl(repository), repository);
+  if (!isWindows) {
+    for (const repository of ['example/project', 'example/Project', 'Dragonshorn-Studios/shiori-brain', 'Acme/acme.github.io', 'Acme/Acme.github.io', '']) {
+      assert.equal(shellArchiveUrl(repository), githubPagesUrl(repository), repository);
+    }
   }
 });
 
@@ -520,12 +531,14 @@ test('normalizeArchiveUrl allows https and localhost http only', () => {
     () => runMcpCli(['verify', '--home', '/tmp', '--host', 'cursor'], { env: { ...process.env, [ARCHIVE_ENV]: 'http://example.github.io/project/' } }),
     /https URL/
   );
-  assert.ok(shellAllowsArchiveUrl('https://example.github.io/Project/'));
-  assert.ok(shellAllowsArchiveUrl('http://localhost:4173/archive'));
-  assert.ok(shellAllowsArchiveUrl('http://127.0.0.1/'));
-  assert.ok(shellAllowsArchiveUrl('http://[::1]/brain'));
-  assert.equal(shellAllowsArchiveUrl('http://example.github.io/project/'), false);
-  assert.equal(shellAllowsArchiveUrl('http://localhost.evil.example/'), false);
+  if (!isWindows) {
+    assert.ok(shellAllowsArchiveUrl('https://example.github.io/Project/'));
+    assert.ok(shellAllowsArchiveUrl('http://localhost:4173/archive'));
+    assert.ok(shellAllowsArchiveUrl('http://127.0.0.1/'));
+    assert.ok(shellAllowsArchiveUrl('http://[::1]/brain'));
+    assert.equal(shellAllowsArchiveUrl('http://example.github.io/project/'), false);
+    assert.equal(shellAllowsArchiveUrl('http://localhost.evil.example/'), false);
+  }
 });
 
 test('parseCliMcpEntry reads Claude labeled get and Codex transport JSON', () => {
@@ -766,20 +779,25 @@ test('generated doctor --install cursor writes MCP config using the shared helpe
   const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-doctor-'));
   const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
   const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
-  await writeExecutable(join(binDir, 'figcraft-cli'), '#!/bin/sh\n[ "$1" = --version ] && echo figcraft-cli 0.0.0 && exit 0\nexit 1\n');
-  const files = installSupportFiles({ repository: 'example/project', marketplaceName: 'project-knowledge' });
-  for (const [path, content] of files) {
-    await mkdir(join(repositoryRoot, dirname(path)), { recursive: true });
-    await writeFile(join(repositoryRoot, path), content, path.endsWith('.sh') ? { mode: 0o755 } : undefined);
-  }
-  execFileSync('sh', ['scripts/shiori-doctor.sh', '--install', 'cursor'], {
-    cwd: repositoryRoot,
-    env: { ...fakeCraftPath(binDir), HOME: home, SHIORI_CHECKOUT: repositoryRoot }
+  const upstream = await makeUpstreamRepo({ repository: 'example/project', marketplace: 'project-knowledge' });
+  const gitVars = await writeFakeGit(binDir, upstream);
+  await writeDoctorTree(repositoryRoot, { repository: 'example/project', marketplace: 'project-knowledge' });
+  const figcraftName = isWindows ? 'figcraft-cli.cmd' : 'figcraft-cli';
+  await writeExecutable(join(binDir, figcraftName), isWindows
+    ? '@echo off\r\nif "%~1"=="--version" (echo figcraft-cli 0.0.0 & exit /b 0)\r\nexit /b 1\r\n'
+    : '#!/bin/sh\n[ "$1" = --version ] && echo figcraft-cli 0.0.0 && exit 0\nexit 1\n');
+  const env = baseDoctorEnv(home, {
+    binDir,
+    gitEnv: gitVars,
+    extra: { SHIORI_MARKETPLACE: 'project-knowledge' }
   });
+  const result = runDoctor(repositoryRoot, { install: ['cursor'] }, { home, env });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
   const config = JSON.parse(await readFile(join(home, '.cursor/mcp.json'), 'utf8'));
+  const checkoutScript = join(home, '.local/share/shiori/shiori-brain/packages/shiori-brain-mcp/src/index.js');
   assert.equal(config.mcpServers['shiori-brain'].command, 'node');
-  assert.equal(config.mcpServers['shiori-brain'].args[0], join(repositoryRoot, 'packages/shiori-brain-mcp/src/index.js'));
-  assert.equal(config.mcpServers['shiori-brain'].env[ARCHIVE_ENV], 'https://example.github.io/project/');
+  assert.equal(config.mcpServers['shiori-brain'].args[0], checkoutScript);
+  assert.equal(config.mcpServers['shiori-brain'].env[ARCHIVE_ENV], DOCTOR_ARCHIVE_URL);
   assert.deepEqual(config.mcpServers.figcraft.args, ['mcp']);
   assert.equal(config.mcpServers.cadcraft, undefined);
   assert.equal(existsSync(join(home, '.cursor/rules')), false);
@@ -792,19 +810,18 @@ test('generated doctor --install cursor writes MCP config using the shared helpe
 test('generated doctor --install devin writes MCP config using the shared helper', async () => {
   const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-doctor-'));
   const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
-  const files = installSupportFiles({ repository: 'example/project', marketplaceName: 'project-knowledge' });
-  for (const [path, content] of files) {
-    await mkdir(join(repositoryRoot, dirname(path)), { recursive: true });
-    await writeFile(join(repositoryRoot, path), content, path.endsWith('.sh') ? { mode: 0o755 } : undefined);
-  }
-  execFileSync('sh', ['scripts/shiori-doctor.sh', '--install', 'devin'], {
-    cwd: repositoryRoot,
-    env: { ...withArchive(process.env), HOME: home, SHIORI_CHECKOUT: repositoryRoot }
-  });
+  const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
+  const upstream = await makeUpstreamRepo({ repository: 'example/project', marketplace: 'project-knowledge' });
+  const gitVars = await writeFakeGit(binDir, upstream);
+  await writeDoctorTree(repositoryRoot, { repository: 'example/project', marketplace: 'project-knowledge' });
+  const env = baseDoctorEnv(home, { binDir, gitEnv: gitVars });
+  const result = runDoctor(repositoryRoot, { install: ['devin'] }, { home, env });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
   const config = JSON.parse(await readFile(join(home, '.config/devin/mcp_config.json'), 'utf8'));
+  const checkoutScript = join(home, '.local/share/shiori/shiori-brain/packages/shiori-brain-mcp/src/index.js');
   assert.equal(config.mcpServers['shiori-brain'].command, 'node');
-  assert.equal(config.mcpServers['shiori-brain'].args[0], join(repositoryRoot, 'packages/shiori-brain-mcp/src/index.js'));
-  assert.equal(config.mcpServers['shiori-brain'].env[ARCHIVE_ENV], 'https://example.github.io/project/');
+  assert.equal(config.mcpServers['shiori-brain'].args[0], checkoutScript);
+  assert.equal(config.mcpServers['shiori-brain'].env[ARCHIVE_ENV], DOCTOR_ARCHIVE_URL);
   const recorded = await readFile(join(home, '.local/state/shiori/installed-hosts'), 'utf8');
   assert.match(recorded, /^devin$/m);
 });
