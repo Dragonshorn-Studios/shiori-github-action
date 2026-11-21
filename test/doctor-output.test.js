@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   baseDoctorEnv,
+  forEachDoctorKind,
   makeUpstreamRepo,
   runDoctor,
   writeDoctorTree,
@@ -44,14 +45,14 @@ cursor: MCP -> ~/.cursor/mcp.json
 already current
 `;
 
-test('default install/update stdout snapshot', async () => {
+forEachDoctorKind('default install/update stdout snapshot', async (_t, kind) => {
   const { workDir, home, env } = await setupDoctor();
   await mkdir(join(home, '.cursor'), { recursive: true });
-  const installed = runDoctor(workDir, { install: [] }, { home, env });
+  const installed = runDoctor(workDir, { install: [] }, { home, env, kind });
   assert.equal(installed.status, 0, installed.stderr + installed.stdout);
   assert.equal(snapshotStdout(installed.stdout), EXPECTED_INSTALL);
 
-  const updated = runDoctor(workDir, { update: true }, { home, env });
+  const updated = runDoctor(workDir, { update: true }, { home, env, kind });
   assert.equal(updated.status, 0, updated.stderr + updated.stdout);
   assert.equal(snapshotStdout(updated.stdout), EXPECTED_UPDATE);
 });
