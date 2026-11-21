@@ -111,15 +111,17 @@ if (rest[0] === '-C') {
 if (rest[0] === 'clone') {
   const dest = rest.at(-1);
   const url = rest.at(-2);
-  const clone = spawnSync(realGit, ['clone', '--filter=blob:none', '--branch', 'main', upstream, dest], { stdio: 'inherit', env: process.env });
+  const quiet = rest.includes('-q') || rest.includes('--quiet');
+  const clone = spawnSync(realGit, ['clone', ...(quiet ? ['-q'] : []), '--filter=blob:none', '--branch', 'main', upstream, dest], { stdio: 'inherit', env: process.env });
   if (clone.status) process.exit(clone.status);
   const setUrl = spawnSync(realGit, ['-C', dest, 'remote', 'set-url', 'origin', url], { stdio: 'inherit', env: process.env });
   process.exit(setUrl.status ?? 1);
 }
 if (rest[0] === 'pull') {
-  const fetch = spawnSync(realGit, [...cwdArgs, 'fetch', upstream, 'main'], { stdio: 'inherit', env: process.env });
+  const quiet = rest.includes('-q') || rest.includes('--quiet');
+  const fetch = spawnSync(realGit, [...cwdArgs, 'fetch', ...(quiet ? ['-q'] : []), upstream, 'main'], { stdio: 'inherit', env: process.env });
   if (fetch.status) process.exit(fetch.status);
-  const merge = spawnSync(realGit, [...cwdArgs, 'merge', '--ff-only', 'FETCH_HEAD'], { stdio: 'inherit', env: process.env });
+  const merge = spawnSync(realGit, [...cwdArgs, 'merge', ...(quiet ? ['-q'] : []), '--ff-only', 'FETCH_HEAD'], { stdio: 'inherit', env: process.env });
   process.exit(merge.status ?? 1);
 }
 run(args);
@@ -177,22 +179,27 @@ export function baseDoctorEnv(home, { binDir, gitEnv: gitVars = {}, extra = {} }
 }
 
 function shArgs(operation) {
-  if (operation.install) return ['--install', ...operation.install];
-  if (operation.update === true) return ['--update'];
-  if (Array.isArray(operation.update)) return ['--update', ...operation.update];
-  if (operation.help) return ['--help'];
+  const prefix = operation.verbose ? ['--verbose'] : [];
+  if (operation.help) return [...prefix, '--help'];
+  if (operation.install === true || (Array.isArray(operation.install) && operation.install.length === 0)) {
+    return [...prefix, '--install'];
+  }
+  if (operation.install) return [...prefix, '--install', ...operation.install];
+  if (operation.update === true) return [...prefix, '--update'];
+  if (Array.isArray(operation.update)) return [...prefix, '--update', ...operation.update];
   if (operation.verbose) return operation.rest ? ['--verbose', ...operation.rest] : ['--verbose'];
   return operation.rest || [];
 }
 
 function psArgs(operation) {
+  const prefix = operation.verbose ? ['-Verbose'] : [];
+  if (operation.help) return [...prefix, '-Help'];
   if (operation.install === true || (Array.isArray(operation.install) && operation.install.length === 0)) {
-    return ['-Install', 'all'];
+    return [...prefix, '-Install', 'all'];
   }
-  if (operation.install) return ['-Install', operation.install.join(',')];
-  if (operation.update === true) return ['-Update'];
-  if (Array.isArray(operation.update)) return ['-Update', '-UpdateTargets', operation.update.join(',')];
-  if (operation.help) return ['-Help'];
+  if (operation.install) return [...prefix, '-Install', operation.install.join(',')];
+  if (operation.update === true) return [...prefix, '-Update'];
+  if (Array.isArray(operation.update)) return [...prefix, '-Update', '-UpdateTargets', operation.update.join(',')];
   if (operation.verbose) return ['-Verbose', ...(operation.rest || [])];
   return operation.rest || [];
 }

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { githubPagesUrl, renderMcpMarkdownTable } from './mcp-config.js';
+import { githubPagesUrl, MCP_HOSTS, renderMcpMarkdownTable } from './mcp-config.js';
 
 const DEFAULT_REPOSITORY = 'Dragonshorn-Studios/shiori-brain';
 
@@ -539,6 +539,43 @@ function psRecipes(repository) {
   return DOCTOR_HOSTS.filter(host => host.psRecipe).map(host => `  ${fillRepo(host.psRecipe, repository)}`).join('\n');
 }
 
+function allDoctorHostIds() {
+  const seen = new Set();
+  const ids = [];
+  for (const host of installableDoctorHostsInCliOrder()) {
+    ids.push(host.id);
+    seen.add(host.id);
+  }
+  for (const host of DOCTOR_HOSTS) {
+    if (!seen.has(host.id)) ids.push(host.id);
+  }
+  return ids;
+}
+
+function mcpTildePath(host) {
+  const mcp = MCP_HOSTS[host.mcpHost || host.id];
+  return mcp?.configPath ? `~/${mcp.configPath.replaceAll('\\', '/')}` : '';
+}
+
+function shellSkillDestHostCases() {
+  const groups = new Map();
+  for (const host of installableDoctorHosts()) {
+    if (!host.skillsDest) continue;
+    const list = groups.get(host.skillsDest) || [];
+    list.push(hostCasePattern(host));
+    groups.set(host.skillsDest, list);
+  }
+  return [...groups.entries()].map(([dest, patterns]) => `      ${patterns.join('|')}) ${dest}_hosts=\"$${dest}_hosts $selected_target\" ;;`).join('\n');
+}
+
+function shellMcpDestCases() {
+  return installableDoctorHosts().filter(host => host.mcp).map(host => `      ${hostCasePattern(host)}) printf '${host.id}: MCP -> ${mcpTildePath(host)}\\n' ;;`).join('\n');
+}
+
+function psMcpDestSwitch() {
+  return installableDoctorHosts().filter(host => host.mcp).map(host => `        { $_ -in @(${[host.id, ...host.aliases].map(id => `'${id}'`).join(', ')}) } { Write-Output '${host.id}: MCP -> ${mcpTildePath(host)}' }`).join('\n');
+}
+
 function shellLegacyPluginFns() {
   return `warn_legacy_codex_plugin() {
   config_file="$HOME/.codex/config.toml"
@@ -608,7 +645,7 @@ sh scripts/shiori-doctor.sh
 .\\scripts\\shiori-doctor.ps1
 \`\`\`
 
-The doctor is read-only. It does not edit home-directory configuration or install plugins. When piped from GitHub it runs in remote mode and does not assume that this repository's project skill directories exist locally.
+The doctor is read-only. It does not edit home-directory configuration or install plugins. When piped from GitHub it runs in remote mode and does not assume that this repository's project skill directories exist locally. Default \`--install\` / \`--update\` output is a checkout line, the detected hosts, one line per destination, and a short summary. \`--verbose\` (or \`SHIORI_VERBOSE=1\`) restores the status table, recipes, git, and MCP lines. \`--help\` prints usage.
 
 ## Install from the command line
 
@@ -685,6 +722,9 @@ managed_claude_skills_file=\"$state_root/managed-claude-skills\"
 skill_link_temp_prefix='.shiori-link-'
 checkout_changed='false'
 skills_changed='false'
+checkout_line=''
+verbose='false'
+help='false'
 mcp_helper_tmp=''
 mcp_helper_dir=''
 if [ -d '.agents/skills' ] && [ -d 'plugins/shiori' ]; then
@@ -752,12 +792,16 @@ is_allowed_archive_url() {
   return 1
 }
 run_mcp_cli() {
-  has_command node || { printf '%s\\n' 'Skipping MCP config: node is not available.'; return 0; }
+  has_command node || { printf '%s\\n' 'Skipping MCP config: node is not available.' >&2; return 0; }
   helper=$(resolve_mcp_helper) || return 1
   pages_origin=$(archive_url) || pages_origin=''
   [ -n \"$pages_origin\" ] || { printf '%s\\n' 'Set SHIORI_BRAIN_BASE_URL to the published Pages origin before installing MCP servers. The installer will not fall back to another project archive.' >&2; return 1; }
   is_allowed_archive_url \"$pages_origin\" || { printf '%s\\n' 'SHIORI_BRAIN_BASE_URL must be an https URL (http is allowed only for localhost).' >&2; return 1; }
-  node \"$helper\" \"$@\" --home \"$HOME\" --checkout \"$checkout\" --base-url \"$pages_origin\"
+  if [ \"$verbose\" = true ]; then
+    node \"$helper\" \"$@\" --home \"$HOME\" --checkout \"$checkout\" --base-url \"$pages_origin\"
+  else
+    node \"$helper\" \"$@\" --home \"$HOME\" --checkout \"$checkout\" --base-url \"$pages_origin\" >/dev/null
+  fi
 }
 contains_text() {
   case $1 in
@@ -841,16 +885,31 @@ ensure_checkout() {
     esac
     [ -z \"$(git -C \"$checkout\" status --porcelain)\" ] || { printf 'Refusing to update dirty checkout: %s\\n' \"$checkout\" >&2; return 1; }
     before=$(git -C \"$checkout\" rev-parse HEAD)
-    git -C \"$checkout\" pull --ff-only origin main
+    if [ \"$verbose\" = true ]; then
+      git -C \"$checkout\" pull --ff-only origin main
+    else
+      git -C \"$checkout\" pull -q --ff-only origin main
+    fi
     after=$(git -C \"$checkout\" rev-parse HEAD)
-    [ \"$before\" = \"$after\" ] || checkout_changed='true'
+    if [ \"$before\" = \"$after\" ]; then
+      checkout_line=\"checkout: already up to date $after\"
+    else
+      checkout_changed='true'
+      checkout_line=\"checkout: fast-forwarded $after\"
+    fi
   elif [ -e \"$checkout\" ] || [ -L \"$checkout\" ]; then
     printf 'Refusing to replace non-checkout path: %s\\n' \"$checkout\" >&2
     return 1
   else
     mkdir -p \"\${checkout%/*}\"
-    git clone --filter=blob:none --branch main \"https://github.com/$repository.git\" \"$checkout\"
+    if [ \"$verbose\" = true ]; then
+      git clone --filter=blob:none --branch main \"https://github.com/$repository.git\" \"$checkout\"
+    else
+      git clone -q --filter=blob:none --branch main \"https://github.com/$repository.git\" \"$checkout\"
+    fi
     checkout_changed='true'
+    after=$(git -C \"$checkout\" rev-parse HEAD)
+    checkout_line=\"checkout: cloned $after\"
   fi
 }
 sync_skills_dest() {
@@ -902,7 +961,9 @@ sync_skills_dest() {
     mv \"$next_managed\" \"$managed_file\"
     skills_changed='true'
   fi
-  printf 'Shared Shiori skills linked from %s into %s.\\n' \"$checkout\" \"$dest_root\"
+  if [ \"$verbose\" = true ]; then
+    printf 'Shared Shiori skills linked from %s into %s.\\n' \"$checkout\" \"$dest_root\"
+  fi
 }
 sync_shared_skills() {
   sync_skills_dest \"$skills_root\" \"$managed_skills_file\"
@@ -911,8 +972,90 @@ sync_claude_skills() {
   sync_skills_dest \"$claude_skills_root\" \"$managed_claude_skills_file\"
 }
 ${shellLegacyPluginFns()}
+comma_hosts() {
+  first=true
+  for item; do
+    if [ \"$first\" = true ]; then
+      printf '%s' \"$item\"
+      first=false
+    else
+      printf ', %s' \"$item\"
+    fi
+  done
+}
+list_detected_hosts() {
+  detected_list=''
+  not_detected=''
+${allDoctorHostIds().map(id => `  if host_detected ${id}; then detected_list=\"$detected_list ${id}\"; else not_detected=\"$not_detected ${id}\"; fi`).join('\n')}
+  detected_list=\${detected_list# }
+  not_detected=\${not_detected# }
+}
+print_quiet_destinations() {
+  agents_hosts=''
+  claude_hosts=''
+  for selected_target in $selected_targets; do
+    case $selected_target in
+${shellSkillDestHostCases()}
+    esac
+  done
+  agents_hosts=\${agents_hosts# }
+  claude_hosts=\${claude_hosts# }
+  [ -z \"$agents_hosts\" ] || printf '%s: skills -> ${SKILL_DESTINATIONS.agents.display}\\n' \"$(comma_hosts $agents_hosts)\"
+  [ -z \"$claude_hosts\" ] || printf '%s: skills -> ${SKILL_DESTINATIONS.claude.display}\\n' \"$(comma_hosts $claude_hosts)\"
+  for selected_target in $selected_targets; do
+    case $selected_target in
+${shellMcpDestCases()}
+    esac
+  done
+}
+print_quiet_report() {
+  if [ -z \"$checkout_line\" ] && [ -d \"$checkout/.git\" ]; then
+    checkout_line=\"checkout: already up to date $(git -C \"$checkout\" rev-parse HEAD)\"
+  fi
+  [ -z \"$checkout_line\" ] || printf '%s\\n' \"$checkout_line\"
+  list_detected_hosts
+  printf 'detected: %s\\n' \"\${detected_list:-none}\"
+  print_quiet_destinations
+  if [ \"$install_failed\" = true ] && [ \"$checkout_changed\" = false ] && [ \"$skills_changed\" = false ]; then
+    printf 'skipped\\n'
+  elif [ \"$checkout_changed\" = false ] && [ \"$skills_changed\" = false ]; then
+    printf 'already current\\n'
+  else
+    printf 'updated\\n'
+  fi
+}
+print_usage() {
+  printf '%s\\n' \\
+    '' \\
+    'How --install and --update work' \\
+    '  --install [hosts]  set up the named hosts, or every locally detected host if none are named. Valid names: ${installableDoctorHostsInCliOrder().map(host => host.id).join(', ')}.' \\
+    '  --update [hosts]   re-run the installer for the named hosts, or every currently detected host if none are named.' \\
+    '                     Recorded-but-missing hosts are not required. Capabilities added by a newer doctor are applied on update.' \\
+    '  --verbose          print the status table, recipes, git, and MCP lines.' \\
+    '  --help             print this usage text.' \\
+    '  Host names may be space- or comma-separated; SHIORI_INSTALL / SHIORI_UPDATE / SHIORI_VERBOSE are the pipe equivalents.' \\
+    '' \\
+    'Recommended native setup' \\
+${shellRecipes(repository).split('\n').map(line => `    '${line}'`).join(' \\\n')} \\
+    '' \\
+    \"Full instructions: $guide_url\"
+}
+print_banner() {
+  printf 'Shiori agent doctor\\nRepository: %s\\nMode: %s (%s)\\n\\n' \"$repository\" \"$context\" \"$project_hint\"
+${shellStatusRows()}
+  printf '%s\\n' '' 'MCP servers' '  Installed under --install / --update for cursor, devin, opencode, claude, and codex. A read-only run does not launch host CLIs.'
+  print_usage
+}
 operation=''
 selected_targets=\"\${SHIORI_INSTALL:-}\"
+case \${SHIORI_VERBOSE:-} in 1|true|all|yes) verbose='true' ;; esac
+while [ \"$#\" -gt 0 ]; do
+  case $1 in
+    --verbose) verbose='true'; shift ;;
+    --help) help='true'; shift ;;
+    *) break ;;
+  esac
+done
 [ -z \"\${SHIORI_UPDATE:-}\" ] || { [ -z \"$selected_targets\" ] || { printf '%s\\n' 'Choose either SHIORI_INSTALL or SHIORI_UPDATE.' >&2; exit 2; }; operation='update'; selected_targets=\"$SHIORI_UPDATE\"; }
 [ -z \"$selected_targets\" ] || operation=\"\${operation:-install}\"
 if [ \"$#\" -gt 0 ]; then
@@ -1029,27 +1172,24 @@ ${shellStatusSkillsCases()}
   esac
 }
 
-printf 'Shiori agent doctor\\nRepository: %s\\nMode: %s (%s)\\n\\n' \"$repository\" \"$context\" \"$project_hint\"
-${shellStatusRows()}
-
-printf '%s\\n' '' 'MCP servers' '  Installed under --install / --update for cursor, devin, opencode, claude, and codex. A read-only run does not launch host CLIs.'
-
-printf '%s\\n' \\
-  '' \\
-  'How --install and --update work' \\
-  '  --install [hosts]  set up the named hosts, or every locally detected host if none are named. Valid names: ${installableDoctorHostsInCliOrder().map(host => host.id).join(', ')}.' \\
-  '  --update [hosts]   re-run the installer for the named hosts, or every currently detected host if none are named.' \\
-  '                     Recorded-but-missing hosts are not required. Capabilities added by a newer doctor are applied on update.' \\
-  '  Host names may be space- or comma-separated; SHIORI_INSTALL / SHIORI_UPDATE are the pipe equivalents.' \\
-  '' \\
-  'Recommended native setup' \\
-${shellRecipes(repository).split('\n').map(line => `  '${line}'`).join(' \\\n')} \\
-  '' \\
-  \"Full instructions: $guide_url\"
+if [ \"$help\" = true ]; then
+  print_usage
+  exit 0
+fi
+if [ \"$verbose\" = true ]; then
+  print_banner
+fi
+if [ -z \"$operation\" ] && [ \"$verbose\" != true ]; then
+  list_detected_hosts
+  printf 'detected: %s\\n' \"\${detected_list:-none}\"
+  printf 'not detected: %s\\n' \"\${not_detected:-none}\"
+fi
 
 if [ -n \"$operation\" ]; then
   assert_home || exit 2
-  printf '%s\\n' '' \"Selected operation: $operation\"
+  if [ \"$verbose\" = true ]; then
+    printf '%s\\n' '' \"Selected operation: $operation\"
+  fi
   previous_ifs=$IFS
   IFS=', '
   agents_skills_selected='false'
@@ -1110,10 +1250,14 @@ ${shellMcpCases()}
 ${shellInstallCases()}
     esac
   done
-  if [ \"$checkout_changed\" = false ] && [ \"$skills_changed\" = false ]; then
-    printf 'already current\\n'
-  fi
   IFS=$previous_ifs
+  if [ \"$verbose\" = true ]; then
+    if [ \"$checkout_changed\" = false ] && [ \"$skills_changed\" = false ]; then
+      printf 'already current\\n'
+    fi
+  else
+    print_quiet_report
+  fi
   if [ \"$install_failed\" = true ]; then
     exit 1
   fi
@@ -1127,11 +1271,12 @@ function renderPowerShellDoctor(repository, marketplace, archiveUrl) {
   const claudeList = psSkillsDestList('claude');
   const mcpList = psMcpList();
   return `# Generated by Shiori. Safe to run from a checkout or through irm | iex.
-[CmdletBinding()]
 param(
     [string[]]$Install = @(),
     [switch]$Update,
-    [string[]]$UpdateTargets = @()
+    [string[]]$UpdateTargets = @(),
+    [switch]$Verbose,
+    [switch]$Help
 )
 
 $Repository = if ($env:SHIORI_REPOSITORY) { $env:SHIORI_REPOSITORY } else { '${repository}' }
@@ -1148,6 +1293,9 @@ $ManagedClaudeSkillsFile = Join-Path $StateRoot 'managed-claude-skills'
 $SkillLinkTempPrefix = '.shiori-link-'
 $script:CheckoutChanged = $false
 $script:SkillsChanged = $false
+$script:CheckoutLine = ''
+if ($env:SHIORI_VERBOSE -and $env:SHIORI_VERBOSE -notin @('0', 'false')) { $Verbose = $true }
+$script:Verbose = [bool]$Verbose
 $McpHelperTemp = $null
 $LocalCheckout = (Test-Path -LiteralPath '.agents\\skills') -and (Test-Path -LiteralPath 'plugins\\shiori')
 $Mode = if ($LocalCheckout) { 'checkout' } else { 'remote' }
@@ -1185,14 +1333,18 @@ function Test-ShioriArchiveUrl {
 function Invoke-McpCli {
     param([string[]]$McpArgs)
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-        Write-Host 'Skipping MCP config: node is not available.'
+        [Console]::Error.WriteLine('Skipping MCP config: node is not available.')
         return
     }
     $ArchiveUrl = Get-ShioriArchiveUrl
     if (-not $ArchiveUrl) { throw 'Set SHIORI_BRAIN_BASE_URL to the published Pages origin before installing MCP servers. The installer will not fall back to another project''s archive.' }
     if (-not (Test-ShioriArchiveUrl $ArchiveUrl)) { throw 'SHIORI_BRAIN_BASE_URL must be an https URL (http is allowed only for localhost).' }
     $Helper = Get-McpHelper
-    & node $Helper @McpArgs --home $HOME --checkout $ManagedCheckout --base-url $ArchiveUrl
+    if ($script:Verbose) {
+        & node $Helper @McpArgs --home $HOME --checkout $ManagedCheckout --base-url $ArchiveUrl
+    } else {
+        & node $Helper @McpArgs --home $HOME --checkout $ManagedCheckout --base-url $ArchiveUrl | Out-Null
+    }
     if ($LASTEXITCODE -ne 0) { throw \"Shiori MCP helper failed with exit code $LASTEXITCODE\" }
 }
 
@@ -1276,17 +1428,32 @@ function Update-ManagedCheckout {
         if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the managed checkout.' }
         if ($Dirty) { throw \"Refusing to update dirty checkout: $ManagedCheckout\" }
         $Before = (& git -C $ManagedCheckout rev-parse HEAD | Out-String).Trim()
-        & git -C $ManagedCheckout pull --ff-only origin main
+        if ($script:Verbose) {
+            & git -C $ManagedCheckout pull --ff-only origin main
+        } else {
+            & git -C $ManagedCheckout pull -q --ff-only origin main
+        }
         if ($LASTEXITCODE -ne 0) { throw 'Unable to fast-forward the managed Shiori checkout.' }
         $After = (& git -C $ManagedCheckout rev-parse HEAD | Out-String).Trim()
-        if ($Before -ne $After) { $script:CheckoutChanged = $true }
+        if ($Before -ne $After) {
+            $script:CheckoutChanged = $true
+            $script:CheckoutLine = \"checkout: fast-forwarded $After\"
+        } else {
+            $script:CheckoutLine = \"checkout: already up to date $After\"
+        }
     } elseif (Get-Item -LiteralPath $ManagedCheckout -Force -ErrorAction SilentlyContinue) {
         throw \"Refusing to replace non-checkout path: $ManagedCheckout\"
     } else {
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ManagedCheckout) | Out-Null
-        & git clone --filter=blob:none --branch main \"https://github.com/$Repository.git\" $ManagedCheckout
+        if ($script:Verbose) {
+            & git clone --filter=blob:none --branch main \"https://github.com/$Repository.git\" $ManagedCheckout
+        } else {
+            & git clone -q --filter=blob:none --branch main \"https://github.com/$Repository.git\" $ManagedCheckout
+        }
         if ($LASTEXITCODE -ne 0) { throw 'Unable to clone the managed Shiori checkout.' }
         $script:CheckoutChanged = $true
+        $After = (& git -C $ManagedCheckout rev-parse HEAD | Out-String).Trim()
+        $script:CheckoutLine = \"checkout: cloned $After\"
     }
 }
 
@@ -1434,7 +1601,7 @@ function Sync-SkillsDest {
         [IO.File]::WriteAllText($ManagedFile, $NextText, $Utf8)
         $script:SkillsChanged = $true
     }
-    Write-Host \"Shared Shiori skills linked from $ManagedCheckout into $DestRoot.\"
+    if ($script:Verbose) { Write-Host \"Shared Shiori skills linked from $ManagedCheckout into $DestRoot.\" }
 }
 
 function Sync-SharedSkills {
@@ -1472,29 +1639,72 @@ ${psAssertSwitch()}
     }
 }
 
-Write-Host 'Shiori agent doctor'
-Write-Host "Repository: $Repository"
-Write-Host "Mode: $Mode ($ProjectHint)"
-Write-Host ''
-${psStatusRows()}
-
-Write-Host ''
-Write-Host 'MCP servers'
-Write-Host '  Installed under -Install / -Update for cursor, devin, opencode, claude, and codex. A read-only run does not launch host CLIs.'
-
-Write-Host @"
+function Write-DoctorUsage {
+    Write-Host @"
 
 How -Install and -Update work
   -Install [hosts]  set up the named hosts, or every locally detected host if none are named (use -Install all). Valid names: ${installableDoctorHostsInCliOrder().map(host => host.id).join(', ')}.
   -Update [hosts]   re-run the installer for the named hosts, or every currently detected host if none are named.
                     Recorded-but-missing hosts are not required. Capabilities added by a newer doctor are applied on update.
-  Host names may be comma- or space-separated; SHIORI_INSTALL / SHIORI_UPDATE are the pipe equivalents.
+  -Verbose          print the status table, recipes, git, and MCP lines.
+  -Help             print this usage text.
+  Host names may be comma- or space-separated; SHIORI_INSTALL / SHIORI_UPDATE / SHIORI_VERBOSE are the pipe equivalents.
 
 Recommended native setup
 ${psRecipes(repository)}
 
 Full instructions: $GuideUrl
 "@
+}
+
+function Get-DetectedHostLists {
+    $Detected = @()
+    $Missing = @()
+    foreach ($Name in @(${allDoctorHostIds().map(id => `'${id}'`).join(', ')})) {
+        if (Test-HostDetected $Name) { $Detected += $Name } else { $Missing += $Name }
+    }
+    return @{ Detected = $Detected; Missing = $Missing }
+}
+
+function Write-QuietReport {
+    param([string[]]$Selected, [bool]$Failed)
+    if (-not $script:CheckoutLine -and (Test-Path -LiteralPath (Join-Path $ManagedCheckout '.git'))) {
+        $Sha = (& git -C $ManagedCheckout rev-parse HEAD | Out-String).Trim()
+        $script:CheckoutLine = \"checkout: already up to date $Sha\"
+    }
+    if ($script:CheckoutLine) { Write-Output $script:CheckoutLine }
+    $Lists = Get-DetectedHostLists
+    $DetectedText = if ($Lists.Detected.Count -gt 0) { $Lists.Detected -join ', ' } else { 'none' }
+    Write-Output \"detected: $DetectedText\"
+    $AgentsHosts = @($Selected | Where-Object { $_ -in @(${agentsList}) })
+    $ClaudeHosts = @($Selected | Where-Object { $_ -in @(${claudeList}) })
+    if ($AgentsHosts.Count -gt 0) { Write-Output (\"$($AgentsHosts -join ', '): skills -> ${SKILL_DESTINATIONS.agents.display}\") }
+    if ($ClaudeHosts.Count -gt 0) { Write-Output (\"$($ClaudeHosts -join ', '): skills -> ${SKILL_DESTINATIONS.claude.display}\") }
+    foreach ($Target in $Selected) {
+        switch ($Target) {
+${psMcpDestSwitch()}
+        }
+    }
+    if ($Failed -and -not $script:CheckoutChanged -and -not $script:SkillsChanged) { Write-Output 'skipped' }
+    elseif (-not $script:CheckoutChanged -and -not $script:SkillsChanged) { Write-Output 'already current' }
+    else { Write-Output 'updated' }
+}
+
+if ($Help) {
+    Write-DoctorUsage
+    return
+}
+if ($script:Verbose) {
+    Write-Host 'Shiori agent doctor'
+    Write-Host "Repository: $Repository"
+    Write-Host "Mode: $Mode ($ProjectHint)"
+    Write-Host ''
+${psStatusRows()}
+    Write-Host ''
+    Write-Host 'MCP servers'
+    Write-Host '  Installed under -Install / -Update for cursor, devin, opencode, claude, and codex. A read-only run does not launch host CLIs.'
+    Write-DoctorUsage
+}
 
 function Split-HostNames {
     param([string[]]$Names)
@@ -1513,6 +1723,13 @@ $Targets = @(Split-HostNames $Targets | ForEach-Object { $_.ToLowerInvariant() }
 if ($Operation -and $Targets.Count -eq 0) {
     $Targets = @(${installableDoctorHostsInCliOrder().map(host => `'${host.id}'`).join(', ')}) | Where-Object { Test-HostDetected $_ }
     if ($Targets.Count -eq 0) { throw 'No installable hosts detected. Pass a host name to -Install / -Update: ${names}.' }
+}
+if (-not $Operation -and -not $script:Verbose) {
+    $Lists = Get-DetectedHostLists
+    $DetectedText = if ($Lists.Detected.Count -gt 0) { $Lists.Detected -join ', ' } else { 'none' }
+    $MissingText = if ($Lists.Missing.Count -gt 0) { $Lists.Missing -join ', ' } else { 'none' }
+    Write-Output \"detected: $DetectedText\"
+    Write-Output \"not detected: $MissingText\"
 }
 if ($Operation) {
     Assert-Home
@@ -1541,8 +1758,10 @@ if ($Operation) {
     }
     $Targets = $UsableTargets
     if ($Targets.Count -eq 0) { throw 'No remaining hosts could be installed.' }
-    Write-Host ''
-    Write-Host \"Selected operation: $Operation\"
+    if ($script:Verbose) {
+        Write-Host ''
+        Write-Host \"Selected operation: $Operation\"
+    }
     $AgentsSkillsSelected = @($Targets | Where-Object { $_ -in @(${agentsList}) }).Count -gt 0
     $ClaudeSkillsSelected = @($Targets | Where-Object { $_ -in @(${claudeList}) }).Count -gt 0
     $McpTargets = @($Targets | Where-Object { $_ -in @(${mcpList}) })
@@ -1569,8 +1788,12 @@ if ($Operation) {
 ${psInstallSwitch()}
         }
     }
-    if (-not $script:CheckoutChanged -and -not $script:SkillsChanged) {
-        Write-Host 'already current'
+    if ($script:Verbose) {
+        if (-not $script:CheckoutChanged -and -not $script:SkillsChanged) {
+            Write-Host 'already current'
+        }
+    } else {
+        Write-QuietReport -Selected $Targets -Failed $InstallFailed
     }
     if ($InstallFailed) { throw 'One or more hosts could not be installed.' }
 }

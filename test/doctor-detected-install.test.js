@@ -143,7 +143,7 @@ forEachDoctorKind('bare --install does not select cloud-capable Devin without a 
   assert.equal(existsSync(join(home, '.config/devin')), false);
   assert.equal(existsSync(join(home, '.devin')), false);
   assert.ok(!(await recordedHosts(home)).includes('devin'));
-  assert.match(result.stdout, /cloud-capable/);
+  assert.doesNotMatch(result.stdout, /^detected:.*\bdevin\b/m);
 });
 
 forEachDoctorKind('bare --install with no detected hosts writes nothing and errors on stderr', async (_t, kind) => {

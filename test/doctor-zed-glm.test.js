@@ -74,8 +74,8 @@ test('zed is detected from ~/.config/zed without a binary', { skip: isWindows },
   await mkdir(join(home, '.config/zed'), { recursive: true });
   const result = runDoctor(workDir, { rest: [] }, { home, env, kind: 'sh' });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Zed\s+detected/);
-  assert.doesNotMatch(result.stdout, /glm-acp-agent\s+detected/);
+  assert.match(result.stdout, /^detected:.*\bzed\b/m);
+  assert.doesNotMatch(result.stdout, /^detected:.*\bglm\b/m);
 });
 
 test('--install glm links into ~/.claude/skills when glm-acp-agent is a file', { skip: isWindows }, async () => {
@@ -97,14 +97,14 @@ test('glm detection uses the npx registry file and never a Zed directory alone',
   await mkdir(join(home, '.local/share/zed'), { recursive: true });
   const readonly = runDoctor(workDir, { rest: [] }, { home, env, kind: 'sh' });
   assert.equal(readonly.status, 0, readonly.stderr);
-  assert.doesNotMatch(readonly.stdout, /glm-acp-agent\s+detected/);
+  assert.doesNotMatch(readonly.stdout, /^detected:.*\bglm\b/m);
 
   const agentPath = join(home, '.local/share/zed/external_agents/registry/npx/glm-acp-agent/node_modules/.bin/glm-acp-agent');
   await mkdir(dirname(agentPath), { recursive: true });
   await writeFile(agentPath, '#!/bin/sh\necho spawned >> /tmp/glm-should-not-run\n', { mode: 0o755 });
   const detected = runDoctor(workDir, { rest: [] }, { home, env, kind: 'sh' });
   assert.equal(detected.status, 0, detected.stderr);
-  assert.match(detected.stdout, /glm-acp-agent\s+detected/);
+  assert.match(detected.stdout, /^detected:.*\bglm\b/m);
   assert.equal(existsSync('/tmp/glm-should-not-run'), false);
 });
 
