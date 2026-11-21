@@ -95,6 +95,29 @@ export const DOCTOR_HOSTS = [
     psRecipe: 'Claude:   -Install claude links skills through ~/.claude/skills and writes MCP config. Plugin marketplace is a separate channel.'
   },
   {
+    id: 'glm',
+    aliases: ['glm-acp'],
+    statusName: 'glm-acp-agent',
+    guideName: 'glm',
+    nativeName: 'glm-acp-agent',
+    detectCommand: 'glm-acp-agent',
+    detectHome: ['.local/share/zed/external_agents/registry/npx/glm-acp-agent/node_modules/.bin/glm-acp-agent'],
+    detectFiles: ['.local/share/zed/external_agents/registry/npx/glm-acp-agent/node_modules/.bin/glm-acp-agent'],
+    skillsDest: 'claude',
+    mcp: false,
+    mcpHost: null,
+    installable: true,
+    skipWindows: true,
+    cloud: false,
+    statusKnown: true,
+    legacyPlugin: null,
+    installEffect: 'Managed checkout + Agent Skills links in `~/.claude/skills` (shared with Claude Code). A Zed directory alone does not count as detection.',
+    projectUse: 'Zed glm-acp-agent reads `~/.claude/skills`',
+    nativeSetup: '`--install glm` (alias `glm-acp`) links skills through `~/.claude/skills`. Detection is file existence only (`glm-acp-agent` on `PATH` or the npx registry binary under `~/.local/share/zed`); the doctor never runs the binary. Windows support is out of scope.',
+    recipe: 'glm:      --install glm links skills through ~/.claude/skills when glm-acp-agent is present as a file.',
+    psRecipe: 'glm:      skipped on Windows; Unix --install glm links skills through ~/.claude/skills.'
+  },
+  {
     id: 'zcode',
     aliases: [],
     statusName: 'ZCode',
@@ -231,10 +254,33 @@ export const DOCTOR_HOSTS = [
     nativeSetup: '`--install devin` writes user-scope MCP config to `~/.config/devin/mcp_config.json` and joins the shared `~/.agents/skills` sync when selected. Devin may be cloud-only, so absence of a local executable is not an error. The doctor does not write `~/.config/devin/skills`.',
     recipe: 'Devin:    --install devin writes user-scope MCP config and links skills through ~/.agents/skills.',
     psRecipe: 'Devin:    -Install devin writes user-scope MCP config and links skills through ~/.agents/skills.'
+  },
+  {
+    id: 'zed',
+    aliases: [],
+    statusName: 'Zed',
+    guideName: 'zed',
+    nativeName: 'Zed Agent',
+    detectCommand: 'zed',
+    detectHome: ['.config/zed', '.local/share/zed'],
+    detectFiles: [],
+    skillsDest: 'agents',
+    mcp: false,
+    mcpHost: null,
+    installable: true,
+    skipWindows: true,
+    cloud: false,
+    statusKnown: true,
+    legacyPlugin: null,
+    installEffect: 'Managed checkout + Agent Skills links in `~/.agents/skills` only. Does not write a Zed-specific skill tree.',
+    projectUse: 'Automatic through `~/.agents/skills`',
+    nativeSetup: '`--install zed` links skills through `~/.agents/skills`. Detected if `zed` is on `PATH`, or `~/.config/zed` / `~/.local/share/zed` exists. Windows support is out of scope.',
+    recipe: 'Zed:      --install zed links skills through ~/.agents/skills.',
+    psRecipe: 'Zed:      skipped on Windows; Unix --install zed links skills through ~/.agents/skills.'
   }
 ];
 
-const CLI_HOST_ORDER = ['opencode', 'mcode', 'vibe', 'codex', 'claude', 'cursor', 'devin'];
+const CLI_HOST_ORDER = ['opencode', 'mcode', 'vibe', 'codex', 'claude', 'cursor', 'devin', 'zed', 'glm'];
 
 export function installableDoctorHosts() {
   return DOCTOR_HOSTS.filter(host => host.installable);
@@ -1467,6 +1513,17 @@ if ($UpdateFromRecorded) {
 }
 if ($Operation) {
     Assert-Home
+    $SkipWindowsHosts = @(${psSkipWindowsList()})
+    $KeptTargets = @()
+    foreach ($Target in @($Targets)) {
+        if ($SkipWindowsHosts.Count -gt 0 -and $Target -in $SkipWindowsHosts) {
+            [Console]::Error.WriteLine(('Skipping ' + $Target + ': Windows support is not available.'))
+            continue
+        }
+        $KeptTargets += $Target
+    }
+    $Targets = $KeptTargets
+    if ($Targets.Count -eq 0) { return }
     foreach ($Target in $Targets) { Assert-PluginInstaller $Target }
     Write-Host ''
     Write-Host \"Selected operation: $Operation\"
