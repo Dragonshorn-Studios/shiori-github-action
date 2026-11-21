@@ -32,11 +32,8 @@ async function setupDoctor(options = {}) {
 async function assertLink(path, expectedTarget) {
   const { readlinkSync, lstatSync } = await import('node:fs');
   if (isWindows) {
-    const { skillLinkTarget } = await import('./doctor-fixtures.js');
-    assert.equal(
-      skillLinkTarget(path).replaceAll('\\', '/').replace(/\/$/, ''),
-      expectedTarget.replaceAll('\\', '/').replace(/\/$/, '')
-    );
+    const { samePath, skillLinkTarget } = await import('./doctor-fixtures.js');
+    assert.equal(samePath(skillLinkTarget(path), expectedTarget), true);
     return;
   }
   assert.equal(lstatSync(path).isSymbolicLink(), true);
