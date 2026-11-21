@@ -23,6 +23,7 @@ import {
   makeUpstreamRepo,
   plantOutwardSkillsDir,
   runDoctor,
+  samePath,
   skillLinkTarget,
   writeDoctorTree,
   writeFakeGit
@@ -41,12 +42,7 @@ async function setupDoctor(options = {}) {
 
 function assertOurLink(path, expectedTarget) {
   assert.equal(existsSync(path), true, `missing skill link ${path}`);
-  const actual = skillLinkTarget(path);
-  assert.equal(
-    actual.replaceAll('\\', '/').replace(/\/$/, ''),
-    expectedTarget.replaceAll('\\', '/').replace(/\/$/, ''),
-    `unexpected link target for ${path}`
-  );
+  assert.equal(samePath(skillLinkTarget(path), expectedTarget), true, `unexpected link target for ${path}`);
 }
 
 function isDirectoryNotLink(path) {

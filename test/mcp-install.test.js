@@ -54,6 +54,15 @@ async function writeExecutable(path, body) {
   await writeFile(path, body, { mode: 0o755 });
 }
 
+async function writeCraftCli(binDir) {
+  await writeExecutable(
+    join(binDir, isWindows ? 'figcraft-cli.cmd' : 'figcraft-cli'),
+    isWindows
+      ? '@echo off\r\nif "%~1"=="--version" (echo figcraft-cli 0.0.0 & exit /b 0)\r\necho ok\r\nexit /b 0\r\n'
+      : '#!/bin/sh\n[ "$1" = --version ] && echo figcraft-cli 0.0.0 && exit 0\necho ok\nexit 0\n'
+  );
+}
+
 function fakeCraftPath(binDir) {
   return withArchive({
     ...process.env,
@@ -305,7 +314,7 @@ test('classifyEntry distinguishes missing, match, stale, and conflict', async ()
 
 test('selectServersForInstall skips Craft CLIs that are not on PATH', async () => {
   const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
-  await writeExecutable(join(binDir, 'figcraft-cli'), '#!/bin/sh\necho ok\n');
+  await writeCraftCli(binDir);
   const { selected, skipped } = selectServersForInstall(mcpServerCatalog(), fakeCraftPath(binDir));
   assert.ok(selected.some(item => item.name === 'shiori-brain'));
   assert.ok(selected.some(item => item.name === 'figcraft'));
@@ -316,7 +325,7 @@ test('selectServersForInstall skips Craft CLIs that are not on PATH', async () =
 test('runMcpCli install writes cursor JSON atomically with a backup and does not write Cursor rules', async () => {
   const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
   const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
-  await writeExecutable(join(binDir, 'figcraft-cli'), '#!/bin/sh\n[ "$1" = --version ] && echo figcraft-cli 0.0.0 && exit 0\nexit 1\n');
+  await writeCraftCli(binDir);
   await mkdir(join(home, '.cursor'), { recursive: true });
   const original = `${JSON.stringify({
     mcpServers: {
@@ -428,7 +437,7 @@ test('OpenCode shape classifies foreign, stale, and matching entries like other 
 test('runMcpCli reports a conflicting JSON craft entry instead of overwriting it', async () => {
   const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
   const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
-  await writeExecutable(join(binDir, 'figcraft-cli'), '#!/bin/sh\n[ "$1" = --version ] && echo figcraft-cli 0.0.0 && exit 0\nexit 1\n');
+  await writeCraftCli(binDir);
   await mkdir(join(home, '.cursor'), { recursive: true });
   await writeFile(join(home, '.cursor/mcp.json'), `${JSON.stringify({
     mcpServers: {
@@ -445,7 +454,7 @@ test('runMcpCli reports a conflicting JSON craft entry instead of overwriting it
 test('runMcpCli reports a JSON url-only entry as conflict and leaves it untouched', async () => {
   const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
   const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
-  await writeExecutable(join(binDir, 'figcraft-cli'), '#!/bin/sh\n[ "$1" = --version ] && echo figcraft-cli 0.0.0 && exit 0\nexit 1\n');
+  await writeCraftCli(binDir);
   const original = {
     mcpServers: {
       figcraft: { url: 'https://figcraft.example/mcp', headers: { Authorization: 'example' } }
@@ -602,7 +611,7 @@ To remove this server, run: claude mcp remove "shiori-brain" -s user
 test('Claude CLI install adds stdio servers and leaves HTTP entries as conflicts', async () => {
   const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
   const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
-  await writeExecutable(join(binDir, 'figcraft-cli'), '#!/bin/sh\n[ "$1" = --version ] && echo figcraft-cli 0.0.0 && exit 0\nexit 1\n');
+  await writeCraftCli(binDir);
   const store = {
     figcraft: { url: 'https://figcraft.example/mcp', headers: { Authorization: 'example' } }
   };
@@ -624,7 +633,7 @@ test('Claude CLI install adds stdio servers and leaves HTTP entries as conflicts
 test('Codex CLI install leaves url-only entries untouched and does not write execpolicy rules', async () => {
   const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
   const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
-  await writeExecutable(join(binDir, 'figcraft-cli'), '#!/bin/sh\n[ "$1" = --version ] && echo figcraft-cli 0.0.0 && exit 0\nexit 1\n');
+  await writeCraftCli(binDir);
   const store = {
     figcraft: { url: 'https://figcraft.example/mcp' }
   };
@@ -739,7 +748,8 @@ test('writeJsonAtomic preserves the existing Cursor config mode', async () => {
   await writeFile(path, `${JSON.stringify({ mcpServers: {} }, null, 2)}\n`);
   chmodSync(path, 0o600);
   runMcpCli(['install', '--home', home, '--host', 'cursor'], { env: withArchive({ ...process.env, PATH: '/missing-bin' }) });
-  assert.equal(statSync(path).mode & 0o777, 0o600);
+  if (!isWindows) assert.equal(statSync(path).mode & 0o777, 0o600);
+  assert.equal(existsSync(path), true);
 });
 
 test('Claude mcp get not-found on stdout still adds, and other parse failures do not', async () => {

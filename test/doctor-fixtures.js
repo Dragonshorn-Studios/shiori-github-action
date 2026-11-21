@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readlinkSync } from 'node:fs';
+import { existsSync, lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, delimiter, join } from 'node:path';
@@ -201,6 +201,18 @@ export function isLink(path) {
   } catch {
     return false;
   }
+}
+
+export function samePath(left, right) {
+  const normalize = (value) => {
+    const raw = String(value || '').replaceAll('\\', '/').replace(/\/$/, '');
+    try {
+      return realpathSync(raw).replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
+    } catch {
+      return raw.toLowerCase();
+    }
+  };
+  return normalize(left) === normalize(right);
 }
 
 export function skillLinkTarget(path) {

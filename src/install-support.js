@@ -1185,17 +1185,24 @@ function Show-AgentStatus {
     }
 }
 
+function Get-RecordedHostNames {
+    if (-not (Test-Path -LiteralPath $InstalledHostsFile)) { return @() }
+    return @(Get-Content -LiteralPath $InstalledHostsFile | ForEach-Object { $_.Trim().TrimStart([char]0xFEFF) } | Where-Object { $_ })
+}
+
 function Add-RecordedHost {
     param([string]$Target)
     New-Item -ItemType Directory -Force -Path $StateRoot | Out-Null
-    $Recorded = if (Test-Path -LiteralPath $InstalledHostsFile) { @(Get-Content -LiteralPath $InstalledHostsFile) } else { @() }
-    if ($Recorded -notcontains $Target) { Add-Content -LiteralPath $InstalledHostsFile -Value $Target -Encoding utf8 }
+    $Recorded = @(Get-RecordedHostNames)
+    if ($Recorded -contains $Target) { return }
+    $Utf8 = New-Object System.Text.UTF8Encoding $false
+    $Lines = $Recorded + $Target
+    [IO.File]::WriteAllText($InstalledHostsFile, (($Lines -join [char]10) + [char]10), $Utf8)
 }
 
 function Test-RecordedHost {
     param([string]$Target)
-    if (-not (Test-Path -LiteralPath $InstalledHostsFile)) { return $false }
-    return @(Get-Content -LiteralPath $InstalledHostsFile) -contains $Target
+    return (Get-RecordedHostNames) -contains $Target
 }
 
 function Update-ManagedCheckout {
@@ -1224,11 +1231,24 @@ function Update-ManagedCheckout {
     }
 }
 
+function Get-CanonicalPath {
+    param([string]$Path)
+    if (-not $Path) { return '' }
+    try {
+        $Full = [IO.Path]::GetFullPath($Path)
+        $Item = Get-Item -LiteralPath $Full -Force -ErrorAction SilentlyContinue
+        if ($Item) { return [IO.Path]::GetFullPath($Item.FullName) }
+        return $Full
+    } catch {
+        return $Path
+    }
+}
+
 function Test-ShioriSkillLink {
     param($Item, [string]$ExpectedTarget)
     if (-not $Item -or $Item.LinkType -notin @('Junction', 'SymbolicLink')) { return $false }
-    $ActualTarget = [IO.Path]::GetFullPath([string]@($Item.Target)[0])
-    return $ActualTarget -eq [IO.Path]::GetFullPath($ExpectedTarget)
+    $ActualTarget = Get-CanonicalPath ([string]@($Item.Target)[0])
+    return $ActualTarget.ToLowerInvariant() -eq (Get-CanonicalPath $ExpectedTarget).ToLowerInvariant()
 }
 
 function Test-SkillsDestInstalled {
@@ -1347,7 +1367,7 @@ function Sync-SkillsDest {
         $script:SkillsChanged = $true
     }
     $Utf8 = New-Object System.Text.UTF8Encoding $false
-    $NextText = if ($ManagedNames.Count -gt 0) { ($ManagedNames -join [Environment]::NewLine) + [Environment]::NewLine } else { '' }
+    $NextText = if ($ManagedNames.Count -gt 0) { ($ManagedNames -join [char]10) + [char]10 } else { '' }
     $PreviousText = if (Test-Path -LiteralPath $ManagedFile) { [IO.File]::ReadAllText($ManagedFile) } else { '' }
     $NormalizedPrevious = ($PreviousText -replace ([char]13 + [char]10), [char]10).Trim()
     $NormalizedNext = ($NextText -replace ([char]13 + [char]10), [char]10).Trim()
@@ -1428,7 +1448,7 @@ $Targets = if ($Operation -eq 'update') { @($UpdateTargets + $EnvironmentUpdate)
 $UpdateFromRecorded = $false
 if ($Operation -eq 'update' -and $Targets.Count -eq 0) {
     if (-not (Test-Path -LiteralPath $InstalledHostsFile)) { throw 'No recorded Shiori installations to update.' }
-    $Targets = @(Get-Content -LiteralPath $InstalledHostsFile)
+    $Targets = @(Get-RecordedHostNames)
     $UpdateFromRecorded = $true
 }
 $Targets = @($Targets | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ } | ForEach-Object { Get-CanonicalHost $_ } | Select-Object -Unique)
