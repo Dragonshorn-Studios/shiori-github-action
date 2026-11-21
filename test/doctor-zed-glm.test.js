@@ -58,13 +58,13 @@ test('generated doctors include zed and glm from the host map; ZCode stays manua
 
 test('--install zed links skills into ~/.agents/skills only', { skip: isWindows }, async () => {
   const { workDir, home, env } = await setupDoctor();
-  const result = runDoctor(workDir, { install: ['zed'] }, { home, env });
+  const result = runDoctor(workDir, { install: ['zed'] }, { home, env, kind: 'sh' });
   assert.equal(result.status, 0, result.stderr + result.stdout);
   await assertLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
   await assertLink(agentsSkill(home, 'beta'), checkoutSkills(home, 'beta'));
   assert.equal(existsSync(join(home, '.config/zed/skills')), false);
   assert.equal(existsSync(join(home, '.zed')), false);
-  const again = runDoctor(workDir, { install: ['zed'] }, { home, env });
+  const again = runDoctor(workDir, { install: ['zed'] }, { home, env, kind: 'sh' });
   assert.equal(again.status, 0, again.stderr);
   assert.match(again.stdout, /already current/);
 });
@@ -72,7 +72,7 @@ test('--install zed links skills into ~/.agents/skills only', { skip: isWindows 
 test('zed is detected from ~/.config/zed without a binary', { skip: isWindows }, async () => {
   const { workDir, home, env } = await setupDoctor();
   await mkdir(join(home, '.config/zed'), { recursive: true });
-  const result = runDoctor(workDir, { rest: [] }, { home, env });
+  const result = runDoctor(workDir, { rest: [] }, { home, env, kind: 'sh' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Zed\s+detected/);
   assert.doesNotMatch(result.stdout, /glm-acp-agent\s+detected/);
@@ -82,7 +82,7 @@ test('--install glm links into ~/.claude/skills when glm-acp-agent is a file', {
   const { workDir, home, env, binDir } = await setupDoctor();
   const log = join(binDir, 'glm-spawn.log');
   await writeFile(join(binDir, 'glm-acp-agent'), `#!/bin/sh\nprintf 'spawned %s\\n' "$*" >> "${log}"\nexit 0\n`, { mode: 0o755 });
-  const result = runDoctor(workDir, { install: ['glm'] }, { home, env });
+  const result = runDoctor(workDir, { install: ['glm'] }, { home, env, kind: 'sh' });
   assert.equal(result.status, 0, result.stderr + result.stdout);
   await assertLink(claudeSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
   assert.equal(existsSync(join(home, '.agents/skills/alpha')), false);
@@ -95,14 +95,14 @@ test('glm detection uses the npx registry file and never a Zed directory alone',
   const { workDir, home, env } = await setupDoctor();
   await mkdir(join(home, '.config/zed'), { recursive: true });
   await mkdir(join(home, '.local/share/zed'), { recursive: true });
-  const readonly = runDoctor(workDir, { rest: [] }, { home, env });
+  const readonly = runDoctor(workDir, { rest: [] }, { home, env, kind: 'sh' });
   assert.equal(readonly.status, 0, readonly.stderr);
   assert.doesNotMatch(readonly.stdout, /glm-acp-agent\s+detected/);
 
   const agentPath = join(home, '.local/share/zed/external_agents/registry/npx/glm-acp-agent/node_modules/.bin/glm-acp-agent');
   await mkdir(dirname(agentPath), { recursive: true });
   await writeFile(agentPath, '#!/bin/sh\necho spawned >> /tmp/glm-should-not-run\n', { mode: 0o755 });
-  const detected = runDoctor(workDir, { rest: [] }, { home, env });
+  const detected = runDoctor(workDir, { rest: [] }, { home, env, kind: 'sh' });
   assert.equal(detected.status, 0, detected.stderr);
   assert.match(detected.stdout, /glm-acp-agent\s+detected/);
   assert.equal(existsSync('/tmp/glm-should-not-run'), false);
@@ -111,7 +111,7 @@ test('glm detection uses the npx registry file and never a Zed directory alone',
 test('--install claude glm shares one ~/.claude/skills sync', { skip: isWindows }, async () => {
   const { workDir, home, env, binDir } = await setupDoctor();
   await writeFile(join(binDir, 'claude'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
-  const result = runDoctor(workDir, { install: ['claude', 'glm'] }, { home, env });
+  const result = runDoctor(workDir, { install: ['claude', 'glm'] }, { home, env, kind: 'sh' });
   assert.equal(result.status, 0, result.stderr + result.stdout);
   await assertLink(claudeSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
   const managed = (await readFile(join(home, '.local/state/shiori/managed-claude-skills'), 'utf8')).trim().split(/\r?\n/).filter(Boolean);
@@ -123,7 +123,7 @@ test('--install claude glm shares one ~/.claude/skills sync', { skip: isWindows 
 
 test('glm alias glm-acp is accepted', { skip: isWindows }, async () => {
   const { workDir, home, env } = await setupDoctor();
-  const result = runDoctor(workDir, { install: ['glm-acp'] }, { home, env });
+  const result = runDoctor(workDir, { install: ['glm-acp'] }, { home, env, kind: 'sh' });
   assert.equal(result.status, 0, result.stderr + result.stdout);
   await assertLink(claudeSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
   const recorded = await readFile(join(home, '.local/state/shiori/installed-hosts'), 'utf8');
@@ -134,7 +134,7 @@ test('foreign skill in ~/.claude/skills survives glm install', { skip: isWindows
   const { workDir, home, env } = await setupDoctor();
   await mkdir(join(home, '.claude/skills/alpha'), { recursive: true });
   await writeFile(join(home, '.claude/skills/alpha/SKILL.md'), '# keep\n');
-  const result = runDoctor(workDir, { install: ['glm'] }, { home, env });
+  const result = runDoctor(workDir, { install: ['glm'] }, { home, env, kind: 'sh' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /Warning: skipping skill alpha/);
   assert.equal(await readFile(join(home, '.claude/skills/alpha/SKILL.md'), 'utf8'), '# keep\n');
@@ -144,19 +144,19 @@ test('foreign skill in ~/.claude/skills survives glm install', { skip: isWindows
 test('outward-pointing claude skills dir is refused for glm', { skip: isWindows }, async () => {
   const { workDir, home, env } = await setupDoctor();
   await plantOutwardSkillsDir(home, '.claude/skills');
-  const result = runDoctor(workDir, { install: ['glm'] }, { home, env });
+  const result = runDoctor(workDir, { install: ['glm'] }, { home, env, kind: 'sh' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /leaves HOME/i);
   assert.equal(existsSync(claudeSkill(home, 'alpha')), false);
 });
 
-test('PowerShell doctor skips zed and glm with one log line', { skip: !isWindows }, async () => {
+test('PowerShell doctor skips zed and glm with one log line', async () => {
   const { workDir, home, env } = await setupDoctor();
-  const zed = runDoctor(workDir, { install: ['zed'] }, { home, env });
+  const zed = runDoctor(workDir, { install: ['zed'] }, { home, env, kind: 'ps1' });
   assert.match(zed.stderr, /Skipping zed: Windows support is not available/);
   assert.equal((zed.stderr.match(/Skipping zed:/g) || []).length, 1);
   assert.equal(existsSync(join(home, '.agents/skills')), false);
-  const glm = runDoctor(workDir, { install: ['glm'] }, { home, env });
+  const glm = runDoctor(workDir, { install: ['glm'] }, { home, env, kind: 'ps1' });
   assert.match(glm.stderr, /Skipping glm: Windows support is not available/);
   assert.equal(existsSync(join(home, '.claude/skills')), false);
 });
