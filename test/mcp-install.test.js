@@ -9,6 +9,7 @@ import { installSupportFiles } from '../src/install-support.js';
 import {
   ARCHIVE_URL as DOCTOR_ARCHIVE_URL,
   baseDoctorEnv,
+  forEachDoctorKind,
   isWindows,
   makeUpstreamRepo,
   runDoctor,
@@ -785,7 +786,7 @@ test('Claude mcp get not-found on stdout still adds, and other parse failures do
   assert.equal(opaque['shiori-brain'], undefined);
 });
 
-test('generated doctor --install cursor writes MCP config using the shared helper', async () => {
+forEachDoctorKind('generated doctor --install cursor writes MCP config using the shared helper', async (_t, kind) => {
   const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-doctor-'));
   const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
   const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
@@ -801,7 +802,7 @@ test('generated doctor --install cursor writes MCP config using the shared helpe
     gitEnv: gitVars,
     extra: { SHIORI_MARKETPLACE: 'project-knowledge' }
   });
-  const result = runDoctor(repositoryRoot, { install: ['cursor'] }, { home, env });
+  const result = runDoctor(repositoryRoot, { install: ['cursor'] }, { home, env, kind });
   assert.equal(result.status, 0, result.stderr + result.stdout);
   const config = JSON.parse(await readFile(join(home, '.cursor/mcp.json'), 'utf8'));
   const checkoutScript = join(home, '.local/share/shiori/shiori-brain/packages/shiori-brain-mcp/src/index.js');
@@ -817,7 +818,7 @@ test('generated doctor --install cursor writes MCP config using the shared helpe
   assert.doesNotMatch(setup, /npx -y shiori-brain-mcp/);
 });
 
-test('generated doctor --install devin writes MCP config using the shared helper', async () => {
+forEachDoctorKind('generated doctor --install devin writes MCP config using the shared helper', async (_t, kind) => {
   const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-doctor-'));
   const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
   const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
@@ -825,7 +826,7 @@ test('generated doctor --install devin writes MCP config using the shared helper
   const gitVars = await writeFakeGit(binDir, upstream);
   await writeDoctorTree(repositoryRoot, { repository: 'example/project', marketplace: 'project-knowledge' });
   const env = baseDoctorEnv(home, { binDir, gitEnv: gitVars });
-  const result = runDoctor(repositoryRoot, { install: ['devin'] }, { home, env });
+  const result = runDoctor(repositoryRoot, { install: ['devin'] }, { home, env, kind });
   assert.equal(result.status, 0, result.stderr + result.stdout);
   const config = JSON.parse(await readFile(join(home, '.config/devin/mcp_config.json'), 'utf8'));
   const checkoutScript = join(home, '.local/share/shiori/shiori-brain/packages/shiori-brain-mcp/src/index.js');

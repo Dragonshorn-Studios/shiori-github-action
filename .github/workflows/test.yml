@@ -19,4 +19,3 @@ jobs:
       - run: npm run check
       - run: npm run build
       - run: git diff --exit-code -- dist
-  # test-windows is disabled until Windows runners are available.

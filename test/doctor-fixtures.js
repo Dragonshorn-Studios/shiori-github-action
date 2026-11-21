@@ -4,10 +4,41 @@ import { tmpdir } from 'node:os';
 import { dirname, delimiter, join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import test from 'node:test';
 import { installSupportFiles } from '../src/install-support.js';
 
 export const isWindows = process.platform === 'win32';
+export const SKIP_NO_WINDOWS_RUNNER = 'skipped: no Windows runner';
+
+function resolveOnPath(names) {
+  for (const name of names) {
+    const result = spawnSync(isWindows ? 'where.exe' : 'sh', isWindows ? [name] : ['-c', `command -v ${JSON.stringify(name)}`], {
+      encoding: 'utf8',
+      env: process.env
+    });
+    const line = String(result.stdout || '').split(/\r?\n/).find(item => item.trim());
+    if (line) return line.trim();
+  }
+  return null;
+}
+
+export const PWSH = resolveOnPath(isWindows ? ['pwsh.exe', 'pwsh', 'powershell.exe'] : ['pwsh']);
 export const doctorKind = isWindows ? 'ps1' : 'sh';
+
+export function doctorKinds() {
+  const kinds = [];
+  if (!isWindows) kinds.push('sh');
+  if (PWSH) kinds.push('ps1');
+  return kinds;
+}
+
+export function forEachDoctorKind(name, fn) {
+  for (const kind of doctorKinds()) {
+    test(`${name} (${kind})`, async (t) => {
+      await fn(t, kind);
+    });
+  }
+}
 export const REPOSITORY = 'example/project';
 export const MARKETPLACE = 'shiori-knowledge';
 export const ARCHIVE_URL = 'https://example.github.io/project/';
@@ -133,6 +164,8 @@ export function baseDoctorEnv(home, { binDir, gitEnv: gitVars = {}, extra = {} }
     ...gitVars,
     HOME: home,
     USERPROFILE: home,
+    POWERSHELL_TELEMETRY_OPTOUT: '1',
+    POWERSHELL_UPDATECHECK: 'Off',
     SHIORI_BRAIN_BASE_URL: ARCHIVE_URL,
     PATH: doctorPath({ binDir }),
     ...extra
@@ -161,14 +194,31 @@ function psArgs(operation) {
   return operation.rest || [];
 }
 
-export function runDoctor(workDir, operation, { home, env, timeout = 30000 } = {}) {
-  const scriptRel = isWindows ? 'scripts/shiori-doctor.ps1' : 'scripts/shiori-doctor.sh';
-  const script = join(workDir, scriptRel);
-  const args = isWindows
-    ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, ...psArgs(operation)]
-    : [script, ...shArgs(operation)];
-  const command = isWindows ? 'powershell.exe' : 'sh';
-  const result = spawnSync(command, args, {
+export function runDoctor(workDir, operation, { kind, home, env, timeout = 30000 } = {}) {
+  const resolvedKind = kind || (isWindows ? 'ps1' : 'sh');
+  if (resolvedKind === 'ps1') {
+    if (!PWSH) throw new Error('pwsh is required to run generated shiori-doctor.ps1 tests');
+    const script = join(workDir, 'scripts/shiori-doctor.ps1');
+    const args = ['-NoProfile', '-NonInteractive'];
+    if (isWindows) args.push('-ExecutionPolicy', 'Bypass');
+    args.push('-File', script, ...psArgs(operation));
+    const result = spawnSync(PWSH, args, {
+      cwd: workDir,
+      env,
+      encoding: 'utf8',
+      timeout,
+      windowsHide: true
+    });
+    return {
+      status: result.status,
+      stdout: String(result.stdout || ''),
+      stderr: String(result.stderr || ''),
+      error: result.error,
+      kind: resolvedKind
+    };
+  }
+  const script = join(workDir, 'scripts/shiori-doctor.sh');
+  const result = spawnSync('sh', [script, ...shArgs(operation)], {
     cwd: workDir,
     env,
     encoding: 'utf8',
@@ -179,20 +229,30 @@ export function runDoctor(workDir, operation, { home, env, timeout = 30000 } = {
     status: result.status,
     stdout: String(result.stdout || ''),
     stderr: String(result.stderr || ''),
-    error: result.error
+    error: result.error,
+    kind: resolvedKind
   };
 }
 
-export async function plantOutwardSkillsDir(home, rel = '.agents/skills') {
+export async function plantOutwardSymlink(home, rel = '.agents/skills') {
   const dest = join(home, rel);
   const outside = await mkdtemp(join(tmpdir(), 'shiori-outside-'));
   await mkdir(dirname(dest), { recursive: true });
-  if (isWindows) {
-    execFileSync('cmd.exe', ['/c', 'mklink', '/J', dest, outside], { encoding: 'utf8' });
-  } else {
-    await symlink(outside, dest, 'dir');
-  }
+  await symlink(outside, dest, 'dir');
   return { dest, outside };
+}
+
+export async function plantOutwardJunction(home, rel = '.agents/skills') {
+  if (!isWindows) throw new Error('junctions require Windows');
+  const dest = join(home, rel);
+  const outside = await mkdtemp(join(tmpdir(), 'shiori-outside-'));
+  await mkdir(dirname(dest), { recursive: true });
+  execFileSync('cmd.exe', ['/c', 'mklink', '/J', dest, outside], { encoding: 'utf8' });
+  return { dest, outside };
+}
+
+export async function plantOutwardSkillsDir(home, rel = '.agents/skills') {
+  return isWindows ? plantOutwardJunction(home, rel) : plantOutwardSymlink(home, rel);
 }
 
 export function isLink(path) {

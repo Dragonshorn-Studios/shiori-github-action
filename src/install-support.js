@@ -1438,6 +1438,12 @@ ${psRecipes(repository)}
 Full instructions: $GuideUrl
 "@
 
+function Split-HostNames {
+    param([string[]]$Names)
+    return @($Names | ForEach-Object { $_ -split '[, ]+' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+$Install = @(Split-HostNames $Install)
+$UpdateTargets = @(Split-HostNames $UpdateTargets)
 if ($env:SHIORI_INSTALL) { $Install += $env:SHIORI_INSTALL -split '[, ]+' }
 $EnvironmentUpdate = @()
 if ($env:SHIORI_UPDATE -and $env:SHIORI_UPDATE -notin @('1', 'true', 'all')) { $EnvironmentUpdate = @($env:SHIORI_UPDATE -split '[, ]+') }
@@ -1451,7 +1457,7 @@ if ($Operation -eq 'update' -and $Targets.Count -eq 0) {
     $Targets = @(Get-RecordedHostNames)
     $UpdateFromRecorded = $true
 }
-$Targets = @($Targets | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ } | ForEach-Object { Get-CanonicalHost $_ } | Select-Object -Unique)
+$Targets = @(Split-HostNames $Targets | ForEach-Object { $_.ToLowerInvariant() } | ForEach-Object { Get-CanonicalHost $_ } | Select-Object -Unique)
 if ($Operation -eq 'install' -and $Targets.Count -eq 0) { throw 'Pass at least one installer: ${names}.' }
 if ($UpdateFromRecorded) {
     $DetectedHints = @(${installableDoctorHosts().map(host => `'${host.id}'`).join(', ')}) | Where-Object {
