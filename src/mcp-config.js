@@ -281,17 +281,25 @@ function installExtensions(env) {
   return extensions;
 }
 
+function canonicalizeExecutable(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
 function executableIfPresent(candidate) {
   try {
     accessSync(candidate, constants.X_OK);
-    return candidate;
+    return canonicalizeExecutable(candidate);
   } catch {
     try {
       accessSync(candidate, constants.F_OK);
     } catch {
       return null;
     }
-    return /\.(exe|cmd|bat|com)$/i.test(candidate) ? candidate : null;
+    return /\.(exe|cmd|bat|com)$/i.test(candidate) ? canonicalizeExecutable(candidate) : null;
   }
 }
 

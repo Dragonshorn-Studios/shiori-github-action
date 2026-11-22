@@ -331,28 +331,50 @@ export function isLink(path) {
   }
 }
 
+function windowsFullName(path) {
+  const literal = String(path || '').replaceAll("'", "''");
+  if (!literal) return '';
+  const shell = PWSH || 'powershell.exe';
+  const result = spawnSync(shell, [
+    '-NoProfile',
+    '-NonInteractive',
+    '-Command',
+    `if (Test-Path -LiteralPath '${literal}') { (Get-Item -LiteralPath '${literal}').FullName } else { [IO.Path]::GetFullPath('${literal}') }`
+  ], { encoding: 'utf8', windowsHide: true });
+  return String(result.stdout || '').trim().split(/\r?\n/).find(item => item.trim()) || '';
+}
+
+export function canonicalPath(value) {
+  const raw = String(value || '').trim().replace(/^\\\\\?\\/, '');
+  if (!raw) return '';
+  const expand = isWindows ? (windowsFullName(raw) || raw) : raw;
+  try {
+    return realpathSync(expand).replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
+  } catch {
+    return expand.replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
+  }
+}
+
 export function samePath(left, right) {
-  const normalize = (value) => {
-    const raw = String(value || '').replaceAll('\\', '/').replace(/\/$/, '');
-    try {
-      return realpathSync(raw).replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
-    } catch {
-      return raw.toLowerCase();
-    }
-  };
-  return normalize(left) === normalize(right);
+  return canonicalPath(left) === canonicalPath(right);
 }
 
 export function skillLinkTarget(path) {
-  if (isWindows) {
-    const result = spawnSync('powershell.exe', [
-      '-NoProfile',
-      '-Command',
-      `(Get-Item -LiteralPath '${path.replaceAll("'", "''")}').Target`
-    ], { encoding: 'utf8' });
-    return String(result.stdout || '').trim();
+  try {
+    return realpathSync(path);
+  } catch {
+    if (isWindows) {
+      const shell = PWSH || 'powershell.exe';
+      const result = spawnSync(shell, [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `[string]@((Get-Item -LiteralPath '${path.replaceAll("'", "''")}').Target)[0]`
+      ], { encoding: 'utf8', windowsHide: true });
+      return String(result.stdout || '').trim();
+    }
+    return readlinkSync(path);
   }
-  return readlinkSync(path);
 }
 
 export function checkoutSkills(home, name) {

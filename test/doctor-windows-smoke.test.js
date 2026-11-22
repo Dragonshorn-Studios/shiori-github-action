@@ -14,6 +14,7 @@ import {
   isWindows,
   makeUpstreamRepo,
   runDoctor,
+  samePath,
   writeDoctorTree,
   writeFakeGit
 } from './doctor-fixtures.js';
@@ -83,9 +84,12 @@ test('windows-latest smoke: doctor writes attach MCP for FigCraft, PdfCraft, and
   const result = runDoctor(repositoryRoot, { install: ['cursor'] }, { home, env, kind: 'ps1' });
   assert.equal(result.status, 0, result.stderr + result.stdout);
   const config = JSON.parse(await readFile(join(home, '.cursor/mcp.json'), 'utf8'));
-  assert.deepEqual(config.mcpServers.figcraft, { command: figcraftPath, args: ['mcp', '--attach', '7979'] });
-  assert.deepEqual(config.mcpServers.pdfcraft, { command: pdfcraftPath, args: ['mcp', '--attach', '7979'] });
-  assert.deepEqual(config.mcpServers.designcraft, { command: designcraftPath, args: ['mcp', '--attach', '7979'] });
+  assert.equal(samePath(config.mcpServers.figcraft.command, figcraftPath), true, config.mcpServers.figcraft.command);
+  assert.deepEqual(config.mcpServers.figcraft.args, ['mcp', '--attach', '7979']);
+  assert.equal(samePath(config.mcpServers.pdfcraft.command, pdfcraftPath), true, config.mcpServers.pdfcraft.command);
+  assert.deepEqual(config.mcpServers.pdfcraft.args, ['mcp', '--attach', '7979']);
+  assert.equal(samePath(config.mcpServers.designcraft.command, designcraftPath), true, config.mcpServers.designcraft.command);
+  assert.deepEqual(config.mcpServers.designcraft.args, ['mcp', '--attach', '7979']);
   assert.equal(config.mcpServers['shiori-brain'].env.SHIORI_BRAIN_BASE_URL, DOCTOR_ARCHIVE_URL);
   assert.match(result.stdout, /cursor: MCP figcraft added/);
   assert.match(result.stdout, /cursor: MCP pdfcraft added/);

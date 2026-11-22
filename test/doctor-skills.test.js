@@ -335,7 +335,9 @@ test('ps1 leftover real directory under the temp prefix is not deleted', {
 });
 
 test('ps1 leftover skill temp that cannot be removed warns and install continues', {
-  skip: PWSH ? false : 'pwsh must be on PATH so ubuntu-latest can run generated shiori-doctor.ps1'
+  skip: isWindows
+    ? 'NTFS ignores POSIX chmod for deletes'
+    : (PWSH ? false : 'pwsh must be on PATH so ubuntu-latest can run generated shiori-doctor.ps1')
 }, async () => {
   const { workDir, home, env } = await setupDoctor();
   const first = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind: 'ps1' });
@@ -356,7 +358,9 @@ test('ps1 leftover skill temp that cannot be removed warns and install continues
 });
 
 test('ps1 obsolete skill link that cannot be removed warns and install continues', {
-  skip: PWSH ? false : 'pwsh must be on PATH so ubuntu-latest can run generated shiori-doctor.ps1'
+  skip: isWindows
+    ? 'NTFS ignores POSIX chmod for deletes'
+    : (PWSH ? false : 'pwsh must be on PATH so ubuntu-latest can run generated shiori-doctor.ps1')
 }, async () => {
   const { workDir, home, env } = await setupDoctor();
   const first = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind: 'ps1' });
