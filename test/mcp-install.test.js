@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { installSupportFiles } from '../src/install-support.js';
 import {
@@ -20,11 +21,14 @@ import {
   ARCHIVE_ENV,
   CRAFT_APPS,
   CRAFT_CONTROL_PORT,
+  MCP_DONE_LINE,
   applyInstructionFile,
   applyJsonMcpConfig,
   classifyEntry,
   cliGetIsNotFound,
+  detectCraftClis,
   githubPagesUrl,
+  isMcpCliEntry,
   mcpServerCatalog,
   normalizeArchiveUrl,
   parseCliMcpEntry,
@@ -220,7 +224,8 @@ function fakeHostExec(store, { getFailures = {} } = {}) {
 test('craft catalog lists the known Storytold CLIs once', () => {
   assert.deepEqual(CRAFT_APPS.map(app => app.command), [
     'figcraft-cli', 'cadcraft-cli', 'deckcraft-cli', 'gridcraft-cli', 'lightcraft-cli',
-    'pdfcraft-cli', 'photocraft-cli', 'wordcraft-cli', 'effectcraft-cli', 'anicraft-cli', 'soundcraft-cli'
+    'pdfcraft-cli', 'photocraft-cli', 'wordcraft-cli', 'effectcraft-cli', 'anicraft-cli', 'soundcraft-cli',
+    'designcraft-cli', 'solidcraft-cli', 'vectorcraft-cli'
   ]);
   const catalog = mcpServerCatalog();
   assert.equal(catalog[0].name, 'shiori-brain');
@@ -1027,3 +1032,164 @@ forEachDoctorKind('generated doctor --install cursor writes attach MCP for a WSL
   assert.deepEqual(config.mcpServers.figcraft, { command: figcraftPath, args: ['mcp', '--attach', '7979'] });
   assert.match(result.stdout, /MCP cursor figcraft added/);
 });
+
+test('nested ArtCraft/DesignCraft install dirs are found within the per-root limit', async () => {
+  const programFiles = await mkdtemp(join(tmpdir(), 'shiori-pf-'));
+  const designcraftPath = await writeNamedCraftCli(
+    join(programFiles, 'ArtCraft', 'DesignCraft'),
+    'designcraft-cli',
+    'designcraft-cli.exe'
+  );
+  const env = craftSearchEnv({ SHIORI_CRAFT_PROGRAM_FILES: programFiles });
+  assert.equal(resolveCommand('designcraft-cli', env), designcraftPath);
+  const { found, missing } = detectCraftClis(env);
+  assert.equal(found.find(item => item.name === 'designcraft')?.command, designcraftPath);
+  assert.deepEqual(found.find(item => item.name === 'designcraft')?.args, ['mcp', '--attach', CRAFT_CONTROL_PORT]);
+  assert.ok(missing.some(item => item.name === 'figcraft'));
+});
+
+test('detect lists Program Files Craft CLIs without writing', async () => {
+  const programFiles = await mkdtemp(join(tmpdir(), 'shiori-pf-'));
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const figcraftPath = await writeNamedCraftCli(join(programFiles, 'FigCraft'), 'figcraft-cli', 'figcraft-cli.exe');
+  const pdfcraftPath = await writeNamedCraftCli(join(programFiles, 'PdfCraft'), 'pdfcraft-cli', 'pdfcraft-cli.exe');
+  await writeNamedCraftCli(join(programFiles, 'ArtCraft', 'DesignCraft'), 'designcraft-cli', 'designcraft-cli.exe');
+  await mkdir(join(home, '.cursor'), { recursive: true });
+  const { lines, reports } = runMcpCli(['detect'], {
+    env: craftSearchEnv({ SHIORI_CRAFT_PROGRAM_FILES: programFiles })
+  });
+  assert.equal(existsSync(join(home, '.cursor/mcp.json')), false);
+  assert.equal(reports.find(item => item.name === 'figcraft')?.command, figcraftPath);
+  assert.equal(reports.find(item => item.name === 'pdfcraft')?.command, pdfcraftPath);
+  assert.ok(reports.some(item => item.name === 'designcraft' && item.status === 'found'));
+  assert.ok(lines.some(line => line === MCP_DONE_LINE));
+  assert.ok(lines.some(line => /MCP detect not found: .*solidcraft/.test(line)));
+  assert.ok(lines.some(line => /MCP detect figcraft found \(/.test(line)));
+});
+
+test('isMcpCliEntry follows realpath through a symlink and ignores undefined argv[1]', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'shiori-entry-'));
+  const helper = join(dir, 'shiori-mcp.mjs');
+  await writeFile(helper, 'export {}\n');
+  const link = join(dir, 'via-link.mjs');
+  await symlink(helper, link);
+  assert.equal(isMcpCliEntry({ moduleUrl: pathToFileURL(helper).href, argv1: link, main: undefined }), true);
+  assert.equal(isMcpCliEntry({ moduleUrl: pathToFileURL(helper).href, argv1: undefined, main: undefined }), false);
+  assert.equal(isMcpCliEntry({ moduleUrl: pathToFileURL(helper).href, argv1: '-', main: true }), false);
+  assert.equal(isMcpCliEntry({
+    moduleUrl: pathToFileURL(join(dir, 'dist/index.js')).href,
+    argv1: join(dir, 'dist/index.js'),
+    main: true
+  }), false);
+});
+
+test('MCP helper CLI does not run under node -e import', () => {
+  const helper = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'mcp-config.js');
+  const result = spawnSync(process.execPath, ['-e', `import(${JSON.stringify(pathToFileURL(helper).href)})`], {
+    encoding: 'utf8'
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(String(result.stdout || '').trim(), '');
+});
+
+test('MCP helper CLI via symlink prints MCP done', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'shiori-helper-link-'));
+  const source = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'mcp-config.js');
+  const helper = join(dir, 'shiori-mcp.mjs');
+  await writeFile(helper, await readFile(source, 'utf8'));
+  const link = join(dir, 'via-link.mjs');
+  await symlink(helper, link);
+  const result = spawnSync(process.execPath, [link, 'detect'], {
+    encoding: 'utf8',
+    env: craftSearchEnv()
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /MCP done/);
+  assert.match(result.stdout, /MCP detect not found:/);
+});
+
+forEachDoctorKind('bare doctor reports nested Program Files Craft CLIs without writing', async (_t, kind) => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-doctor-'));
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
+  const programFiles = await mkdtemp(join(tmpdir(), 'shiori-pf-'));
+  const upstream = await makeUpstreamRepo({ repository: 'example/project', marketplace: 'project-knowledge' });
+  const gitVars = await writeFakeGit(binDir, upstream);
+  await writeDoctorTree(repositoryRoot, { repository: 'example/project', marketplace: 'project-knowledge' });
+  const figcraftPath = await writeNamedCraftCli(join(programFiles, 'FigCraft'), 'figcraft-cli', 'figcraft-cli.exe');
+  await writeNamedCraftCli(join(programFiles, 'PdfCraft'), 'pdfcraft-cli', 'pdfcraft-cli.exe');
+  const designcraftPath = await writeNamedCraftCli(
+    join(programFiles, 'ArtCraft', 'DesignCraft'),
+    'designcraft-cli',
+    'designcraft-cli.exe'
+  );
+  await mkdir(join(home, '.cursor'), { recursive: true });
+  const env = baseDoctorEnv(home, {
+    binDir,
+    gitEnv: gitVars,
+    extra: {
+      SHIORI_CRAFT_WSL: '0',
+      SHIORI_CRAFT_PROGRAM_FILES: programFiles
+    }
+  });
+  const bare = runDoctor(repositoryRoot, {}, { home, env, kind });
+  assert.equal(bare.status, 0, bare.stderr + bare.stdout);
+  assert.equal(existsSync(join(home, '.cursor/mcp.json')), false);
+  assert.match(bare.stdout, /craft: figcraft found/);
+  assert.match(bare.stdout, /craft: pdfcraft found/);
+  assert.match(bare.stdout, /craft: designcraft found/);
+  assert.match(bare.stdout, /craft: not found: .*solidcraft/);
+  assert.match(bare.stdout, /vectorcraft/);
+  assert.match(bare.stdout, new RegExp(figcraftPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(bare.stdout, new RegExp(designcraftPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+forEachDoctorKind('quiet --install cursor reports Craft MCP added then unchanged, and a new Craft as updated', async (_t, kind) => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-doctor-'));
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
+  const programFiles = await mkdtemp(join(tmpdir(), 'shiori-pf-'));
+  const upstream = await makeUpstreamRepo({ repository: 'example/project', marketplace: 'project-knowledge' });
+  const gitVars = await writeFakeGit(binDir, upstream);
+  await writeDoctorTree(repositoryRoot, { repository: 'example/project', marketplace: 'project-knowledge' });
+  const figcraftPath = await writeNamedCraftCli(join(programFiles, 'FigCraft'), 'figcraft-cli', 'figcraft-cli.exe');
+  await writeNamedCraftCli(join(programFiles, 'PdfCraft'), 'pdfcraft-cli', 'pdfcraft-cli.exe');
+  await writeNamedCraftCli(join(programFiles, 'ArtCraft', 'DesignCraft'), 'designcraft-cli', 'designcraft-cli.exe');
+  await mkdir(join(home, '.cursor'), { recursive: true });
+  const env = baseDoctorEnv(home, {
+    binDir,
+    gitEnv: gitVars,
+    extra: {
+      SHIORI_CRAFT_WSL: '0',
+      SHIORI_CRAFT_PROGRAM_FILES: programFiles
+    }
+  });
+  const installed = runDoctor(repositoryRoot, { install: ['cursor'] }, { home, env, kind });
+  assert.equal(installed.status, 0, installed.stderr + installed.stdout);
+  const config = JSON.parse(await readFile(join(home, '.cursor/mcp.json'), 'utf8'));
+  assert.deepEqual(config.mcpServers.figcraft, { command: figcraftPath, args: ['mcp', '--attach', '7979'] });
+  assert.deepEqual(config.mcpServers.pdfcraft.args, ['mcp', '--attach', '7979']);
+  assert.deepEqual(config.mcpServers.designcraft.args, ['mcp', '--attach', '7979']);
+  assert.match(installed.stdout, /cursor: MCP figcraft added/);
+  assert.match(installed.stdout, /cursor: MCP pdfcraft added/);
+  assert.match(installed.stdout, /cursor: MCP designcraft added/);
+  assert.match(installed.stdout, /cursor: MCP shiori-brain added/);
+  assert.match(installed.stdout, /^updated$/m);
+  assert.doesNotMatch(installed.stdout, /already current/);
+
+  const again = runDoctor(repositoryRoot, { install: ['cursor'] }, { home, env, kind });
+  assert.equal(again.status, 0, again.stderr + again.stdout);
+  assert.match(again.stdout, /cursor: MCP figcraft unchanged/);
+  assert.match(again.stdout, /cursor: MCP shiori-brain unchanged/);
+  assert.match(again.stdout, /^already current$/m);
+
+  const wordcraftPath = await writeNamedCraftCli(join(programFiles, 'WordCraft'), 'wordcraft-cli', 'wordcraft-cli.exe');
+  const afterNew = runDoctor(repositoryRoot, { install: ['cursor'] }, { home, env, kind });
+  assert.equal(afterNew.status, 0, afterNew.stderr + afterNew.stdout);
+  const updated = JSON.parse(await readFile(join(home, '.cursor/mcp.json'), 'utf8'));
+  assert.deepEqual(updated.mcpServers.wordcraft, { command: wordcraftPath, args: ['mcp', '--attach', '7979'] });
+  assert.match(afterNew.stdout, /cursor: MCP wordcraft added/);
+  assert.match(afterNew.stdout, /cursor: MCP figcraft unchanged/);
+  assert.match(afterNew.stdout, /^updated$/m);
+});
+

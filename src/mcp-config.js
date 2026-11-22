@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { accessSync, chmodSync, constants, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, chmodSync, constants, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
@@ -9,6 +9,7 @@ export const DEFAULT_CHECKOUT_DISPLAY = '~/.local/share/shiori/shiori-brain';
 export const SHIORI_BRAIN_MCP_SCRIPT = 'packages/shiori-brain-mcp/src/index.js';
 export const ARCHIVE_ENV = 'SHIORI_BRAIN_BASE_URL';
 export const CRAFT_CONTROL_PORT = '7979';
+export const MCP_DONE_LINE = 'MCP done';
 export const SHIORI_RULE_TEXT = 'Consult shiori-brain on demand (`search` / `read_doc`) before architecture or security decisions; do not dump that knowledge into context. Skills are procedures only.';
 const BLOCK_START = '<!-- shiori:start -->';
 const BLOCK_END = '<!-- shiori:end -->';
@@ -28,7 +29,10 @@ export const CRAFT_APPS = [
   { name: 'wordcraft', command: 'wordcraft-cli', summary: 'Word processing (WordCraft)' },
   { name: 'effectcraft', command: 'effectcraft-cli', summary: 'Motion graphics and VFX (EffectCraft)' },
   { name: 'anicraft', command: 'anicraft-cli', summary: '2D vector animation (AniCraft)' },
-  { name: 'soundcraft', command: 'soundcraft-cli', summary: 'Digital audio workstation (SoundCraft)' }
+  { name: 'soundcraft', command: 'soundcraft-cli', summary: 'Digital audio workstation (SoundCraft)' },
+  { name: 'designcraft', command: 'designcraft-cli', summary: 'Product and UI design (DesignCraft)' },
+  { name: 'solidcraft', command: 'solidcraft-cli', summary: '3D solid modeling (SolidCraft)' },
+  { name: 'vectorcraft', command: 'vectorcraft-cli', summary: 'Vector illustration (VectorCraft)' }
 ];
 
 export const MCP_HOSTS = {
@@ -302,19 +306,28 @@ function resolveOnPath(name, env) {
   return null;
 }
 
-function listCraftInstallDirs(root) {
-  let entries;
+function listCraftDirEntries(dir) {
   try {
-    entries = readdirSync(root, { withFileTypes: true });
+    return readdirSync(dir, { withFileTypes: true });
   } catch {
     return [];
   }
+}
+
+function listCraftInstallDirs(root) {
   const dirs = [];
-  for (const entry of entries) {
+  for (const entry of listCraftDirEntries(root)) {
     if (dirs.length >= MAX_CRAFT_DIRS_PER_ROOT) break;
     if (!CRAFT_DIR_RE.test(entry.name)) continue;
     if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-    dirs.push(join(root, entry.name));
+    const installDir = join(root, entry.name);
+    dirs.push(installDir);
+    for (const nested of listCraftDirEntries(installDir)) {
+      if (dirs.length >= MAX_CRAFT_DIRS_PER_ROOT) break;
+      if (!CRAFT_DIR_RE.test(nested.name)) continue;
+      if (!nested.isDirectory() && !nested.isSymbolicLink()) continue;
+      dirs.push(join(installDir, nested.name));
+    }
   }
   return dirs;
 }
@@ -379,6 +392,32 @@ function selectedCraftServer(server, resolved, env) {
     args,
     invocation: `${commandBasename(command)} ${args.join(' ')}`
   };
+}
+
+function serverInvocation(server) {
+  return `${server.command} ${argsList(server.args).join(' ')}`.trim();
+}
+
+function craftReportMessage(server) {
+  if (!server?.whenInstalled) return undefined;
+  return serverInvocation(server);
+}
+
+export function detectCraftClis(env = process.env) {
+  const found = [];
+  const missing = [];
+  for (const app of CRAFT_APPS) {
+    const catalogServer = {
+      name: app.name,
+      command: app.command,
+      args: ['mcp'],
+      whenInstalled: true
+    };
+    const resolved = resolveCommand(app.command, env);
+    if (resolved) found.push(selectedCraftServer(catalogServer, resolved, env));
+    else missing.push(app);
+  }
+  return { found, missing };
 }
 
 export function commandBasename(command) {
@@ -584,7 +623,7 @@ export function applyJsonMcpConfig(text, servers, shape = 'mcpServers') {
         ? 'conflict'
         : classifyEntry(normalizeJsonEntry(existing, shape), server);
     if (classification === 'match') {
-      reports.push({ name: server.name, status: 'unchanged' });
+      reports.push({ name: server.name, status: 'unchanged', message: craftReportMessage(server) });
       continue;
     }
     if (classification === 'conflict') {
@@ -593,12 +632,12 @@ export function applyJsonMcpConfig(text, servers, shape = 'mcpServers') {
     }
     if (classification === 'stale') {
       bucket[server.name] = hostJsonEntry(server, shape, existing);
-      reports.push({ name: server.name, status: 'updated' });
+      reports.push({ name: server.name, status: 'updated', message: craftReportMessage(server) });
       changed = true;
       continue;
     }
     bucket[server.name] = hostJsonEntry(server, shape);
-    reports.push({ name: server.name, status: 'added' });
+    reports.push({ name: server.name, status: 'added', message: craftReportMessage(server) });
     changed = true;
   }
   return { text: stringifyJsonConfig(config), changed, reports, config };
@@ -805,7 +844,7 @@ function applyCliMcpConfig(host, servers, env, execFile, { write }) {
           ? { name: server.name, status: 'ok' }
           : { name: server.name, status: 'error', message: binary.message });
       } else {
-        reports.push({ name: server.name, status: 'unchanged' });
+        reports.push({ name: server.name, status: 'unchanged', message: craftReportMessage(server) });
       }
       continue;
     }
@@ -814,12 +853,16 @@ function applyCliMcpConfig(host, servers, env, execFile, { write }) {
       continue;
     }
     if (!write) {
-      reports.push({ name: server.name, status: classification });
+      reports.push({ name: server.name, status: classification, message: craftReportMessage(server) });
       continue;
     }
     if (classification === 'stale') removeCliEntry(host, server.name, env, execFile);
     addCliEntry(host, server, env, execFile);
-    reports.push({ name: server.name, status: classification === 'stale' ? 'updated' : 'added' });
+    reports.push({
+      name: server.name,
+      status: classification === 'stale' ? 'updated' : 'added',
+      message: craftReportMessage(server)
+    });
   }
   return reports;
 }
@@ -933,15 +976,34 @@ function formatReport(host, report) {
   return `MCP ${host.id} ${report.name} ${report.status}${suffix}`;
 }
 
+function finishMcpCli(lines, reports) {
+  lines.push(MCP_DONE_LINE);
+  return { lines, reports };
+}
+
+function detectCraftReport(env) {
+  const { found, missing } = detectCraftClis(env);
+  const lines = [];
+  const reports = [];
+  for (const server of found) {
+    const message = serverInvocation(server);
+    lines.push(`MCP detect ${server.name} found (${message})`);
+    reports.push({ host: 'detect', name: server.name, status: 'found', message, command: server.command, args: server.args });
+  }
+  lines.push(`MCP detect not found: ${missing.length ? missing.map(app => app.name).join(', ') : 'none'}`);
+  return finishMcpCli(lines, reports);
+}
+
 export function runMcpCli(argv, options = {}) {
   const env = options.env ?? process.env;
   const execFile = options.execFile ?? ((command, args, opts) => execFileSync(command, args, opts));
   const lines = [];
   const args = [...argv];
   let operation = args.shift();
-  if (!operation || operation.startsWith('--')) throw new Error('Pass install, update, or verify.');
+  if (!operation || operation.startsWith('--')) throw new Error('Pass install, update, verify, or detect.');
   if (operation === 'update') operation = 'install';
-  if (!['install', 'verify'].includes(operation)) throw new Error(`Unknown MCP operation: ${operation}`);
+  if (operation === 'list') operation = 'detect';
+  if (!['install', 'verify', 'detect'].includes(operation)) throw new Error(`Unknown MCP operation: ${operation}`);
   let home = options.home ?? homedir();
   let checkout;
   let archiveUrl = env[ARCHIVE_ENV];
@@ -954,6 +1016,7 @@ export function runMcpCli(argv, options = {}) {
     else if (flag === '--base-url') archiveUrl = args.shift();
     else throw new Error(`Unknown option: ${flag}`);
   }
+  if (operation === 'detect') return detectCraftReport(env);
   if (!home || !isAbsolute(home)) throw new Error('MCP home directory must be an absolute path.');
   if (!archiveUrl) {
     throw new Error(`Pass --base-url or set ${ARCHIVE_ENV} to the published Pages origin. The installer will not fall back to another project's archive.`);
@@ -967,7 +1030,7 @@ export function runMcpCli(argv, options = {}) {
   if (write && !hostNames.length) throw new Error('Pass at least one --host: cursor, devin, opencode, claude, or codex.');
   if (!hosts.length) {
     lines.push('MCP no supported agent hosts detected');
-    return { lines, reports: [] };
+    return finishMcpCli(lines, []);
   }
   const allReports = [];
   for (const host of hosts) {
@@ -983,22 +1046,40 @@ export function runMcpCli(argv, options = {}) {
     lines.push(formatReport(host, { name: 'instructions', status: instruction.status, message: instruction.message }));
     allReports.push({ host: host.id, name: 'instructions', status: instruction.status, message: instruction.message });
   }
-  return { lines, reports: allReports };
+  return finishMcpCli(lines, allReports);
 }
 
-function invokedDirectly() {
-  const self = fileURLToPath(import.meta.url).replaceAll('\\', '/');
-  if (self.endsWith('/dist/index.js') || self.endsWith('/src/main.js')) return false;
-  const argv1 = process.argv[1];
-  if (!argv1 || argv1 === '-') return true;
+function canonicalPath(value) {
+  const resolved = realpathSync(value).replace(/^\\\\\?\\/, '').replaceAll('\\', '/');
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+export function isMcpCliEntry(options = {}) {
+  const moduleUrl = options.moduleUrl ?? import.meta.url;
+  const argv1 = Object.prototype.hasOwnProperty.call(options, 'argv1') ? options.argv1 : process.argv[1];
+  const main = Object.prototype.hasOwnProperty.call(options, 'main') ? options.main : import.meta.main;
+  let self;
   try {
-    return self === resolve(argv1).replaceAll('\\', '/');
+    self = fileURLToPath(moduleUrl).replaceAll('\\', '/');
   } catch {
     return false;
   }
+  if (self.endsWith('/dist/index.js') || self.endsWith('/src/main.js')) return false;
+  if (!argv1 || argv1 === '-') return false;
+  if (main === true) return true;
+  if (main === false) return false;
+  try {
+    return canonicalPath(fileURLToPath(moduleUrl)) === canonicalPath(argv1);
+  } catch {
+    try {
+      return self === resolve(argv1).replaceAll('\\', '/');
+    } catch {
+      return false;
+    }
+  }
 }
 
-if (invokedDirectly()) {
+if (isMcpCliEntry()) {
   try {
     const { lines } = runMcpCli(process.argv.slice(2));
     for (const line of lines) console.log(line);

@@ -320,6 +320,8 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(setupGuide, /figcraft-cli mcp/);
   assert.match(setupGuide, /--attach 7979/);
   assert.match(setupGuide, /Program Files/);
+  assert.match(setupGuide, /ArtCraft/);
+  assert.match(setupGuide, /DesignCraft/);
   assert.match(setupGuide, /claude mcp add -s user/);
   assert.match(setupGuide, /Consult shiori-brain on demand/);
   assert.doesNotMatch(setupGuide, /npx -y shiori-brain-mcp/);
@@ -342,6 +344,8 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(shellDoctor, /run_mcp_cli install --host cursor/);
   assert.match(shellDoctor, /run_mcp_cli install --host devin/);
   assert.match(shellDoctor, /run_mcp_cli install --host opencode/);
+  assert.match(shellDoctor, /run_mcp_cli detect/);
+  assert.match(shellDoctor, /produced no status line/);
   assert.match(shellDoctor, /mcp_configured/);
   assert.match(shellDoctor, /host_detected/);
   assert.match(shellDoctor, /select_detected_hosts/);
@@ -378,6 +382,8 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(powerShellDoctor, /Invoke-McpCli -McpArgs @\('install', '--host', 'cursor'\)/);
   assert.match(powerShellDoctor, /Invoke-McpCli -McpArgs @\('install', '--host', 'devin'\)/);
   assert.match(powerShellDoctor, /Invoke-McpCli -McpArgs @\('install', '--host', 'opencode'\)/);
+  assert.match(powerShellDoctor, /Invoke-McpCli -McpArgs @\('detect'\)/);
+  assert.match(powerShellDoctor, /produced no status line/);
   assert.match(powerShellDoctor, /Test-McpConfigured/);
   assert.match(powerShellDoctor, /Test-HostDetected/);
   assert.match(powerShellDoctor, /No installable hosts detected/);
@@ -391,6 +397,11 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(powerShellDoctor, /packages\/shiori-brain-mcp\/src\/index.js/);
   const helper = await readFile(join(repositoryRoot, 'scripts/shiori-mcp.mjs'), 'utf8');
   assert.match(helper, /figcraft-cli/);
+  assert.match(helper, /designcraft-cli/);
+  assert.match(helper, /solidcraft-cli/);
+  assert.match(helper, /vectorcraft-cli/);
+  assert.match(helper, /MCP done/);
+  assert.match(helper, /realpathSync/);
   assert.match(helper, /packages\/shiori-brain-mcp\/src\/index.js/);
   assert.doesNotMatch(helper, /npx -y shiori-brain-mcp/);
   await readFile(join(repositoryRoot, 'packages/shiori-brain-mcp/src/index.js'), 'utf8');

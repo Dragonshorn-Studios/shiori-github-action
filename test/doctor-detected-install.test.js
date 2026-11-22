@@ -115,6 +115,7 @@ forEachDoctorKind('doctor --help prints the all pipe one-liner before named host
   assert.match(text, /read-only/);
   assert.match(text, /--attach 7979/);
   assert.match(text, /Program Files/);
+  assert.match(text, /nested/);
 });
 
 forEachDoctorKind('bare --install on a Cursor-only home installs only Cursor', async (_t, kind) => {
