@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { accessSync, chmodSync, constants, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, chmodSync, constants, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
@@ -8,9 +8,14 @@ import { fileURLToPath } from 'node:url';
 export const DEFAULT_CHECKOUT_DISPLAY = '~/.local/share/shiori/shiori-brain';
 export const SHIORI_BRAIN_MCP_SCRIPT = 'packages/shiori-brain-mcp/src/index.js';
 export const ARCHIVE_ENV = 'SHIORI_BRAIN_BASE_URL';
+export const CRAFT_CONTROL_PORT = '7979';
 export const SHIORI_RULE_TEXT = 'Consult shiori-brain on demand (`search` / `read_doc`) before architecture or security decisions; do not dump that knowledge into context. Skills are procedures only.';
 const BLOCK_START = '<!-- shiori:start -->';
 const BLOCK_END = '<!-- shiori:end -->';
+const CRAFT_DIR_RE = /craft/i;
+const MAX_CRAFT_DIRS_PER_ROOT = 32;
+const MAX_WSL_USERS = 16;
+const SKIP_WSL_USERS = new Set(['public', 'default', 'default user', 'all users', 'defaultuser0']);
 
 export const CRAFT_APPS = [
   { name: 'figcraft', command: 'figcraft-cli', summary: 'Interface design (FigCraft)' },
@@ -158,7 +163,7 @@ export function renderMcpMarkdownTable() {
   ];
   for (const server of mcpServerCatalog()) {
     const when = server.whenInstalled
-      ? `Only when \`${server.command}\` is on \`PATH\``
+      ? `When \`${server.command}\` is on \`PATH\` or in a bounded Program Files / LocalAppData \`*Craft*\` install (including WSL \`/mnt/c\`). Windows and WSL use \`${server.command} mcp --attach ${CRAFT_CONTROL_PORT}\``
       : 'On `--install` / `--update` for Cursor, Devin, OpenCode, Claude Code, and Codex';
     rows.push(`| \`${server.name}\` | \`${server.invocation}\` | ${server.summary} | ${when} |`);
   }
@@ -174,27 +179,210 @@ export function renderMcpDataYaml() {
   ].join('\n')).join('\n') + '\n';
 }
 
-export function resolveCommand(name, env = process.env) {
+function envFlag(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
+  return null;
+}
+
+export function isWslEnv(env = process.env) {
+  const flag = envFlag(env.SHIORI_CRAFT_WSL);
+  if (flag != null) return flag;
+  if (process.platform !== 'linux') return false;
+  return Boolean(env.WSL_DISTRO_NAME || env.WSL_INTEROP);
+}
+
+function usableRoot(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (process.platform !== 'win32' && /^[A-Za-z]:[\\/]/.test(raw)) return '';
+  return raw;
+}
+
+function uniqueRoots(values) {
+  const seen = new Set();
+  const roots = [];
+  for (const value of values) {
+    const root = usableRoot(value);
+    if (!root) continue;
+    const key = posixPath(root).replace(/\/+$/, '').toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    roots.push(root);
+  }
+  return roots;
+}
+
+function wslLocalAppDataProgramRoots(usersRoot, env) {
+  const roots = [];
+  const hinted = env.USERNAME || env.USER;
+  if (hinted && !SKIP_WSL_USERS.has(String(hinted).toLowerCase())) {
+    roots.push(join(usersRoot, hinted, 'AppData', 'Local', 'Programs'));
+  }
+  let entries = [];
+  try {
+    entries = readdirSync(usersRoot, { withFileTypes: true });
+  } catch {
+    return roots;
+  }
+  let count = 0;
+  for (const entry of entries) {
+    if (count >= MAX_WSL_USERS) break;
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    if (entry.name.startsWith('.') || SKIP_WSL_USERS.has(entry.name.toLowerCase())) continue;
+    roots.push(join(usersRoot, entry.name, 'AppData', 'Local', 'Programs'));
+    count += 1;
+  }
+  return roots;
+}
+
+export function craftInstallRoots(env = process.env) {
+  const programFiles = env.SHIORI_CRAFT_PROGRAM_FILES || env.ProgramFiles;
+  const programFilesX86 = env.SHIORI_CRAFT_PROGRAM_FILES_X86 || env['ProgramFiles(x86)'];
+  const localAppData = env.SHIORI_CRAFT_LOCALAPPDATA || env.LOCALAPPDATA;
+  const roots = [];
+  if (programFiles) roots.push(programFiles);
+  if (programFilesX86) roots.push(programFilesX86);
+  if (localAppData) roots.push(join(localAppData, 'Programs'));
+
+  const wslRoot = usableRoot(env.SHIORI_CRAFT_WSL_WINDOWS_ROOT) || (isWslEnv(env) ? '/mnt/c' : '');
+  if (wslRoot) {
+    roots.push(join(wslRoot, 'Program Files'));
+    roots.push(join(wslRoot, 'Program Files (x86)'));
+    roots.push(...wslLocalAppDataProgramRoots(join(wslRoot, 'Users'), env));
+  }
+  return uniqueRoots(roots);
+}
+
+function windowsExtensions(env) {
+  const exts = String(env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';').map(item => item.trim()).filter(Boolean);
+  return exts.length ? exts : ['.EXE', '.CMD', '.BAT', '.COM'];
+}
+
+function pathExtensions(env) {
+  return process.platform === 'win32' ? windowsExtensions(env) : [''];
+}
+
+function installExtensions(env) {
+  const seen = new Set(['']);
+  const extensions = [''];
+  for (const ext of windowsExtensions(env)) {
+    for (const variant of [ext, ext.toLowerCase(), ext.toUpperCase()]) {
+      if (seen.has(variant)) continue;
+      seen.add(variant);
+      extensions.push(variant);
+    }
+  }
+  return extensions;
+}
+
+function executableIfPresent(candidate) {
+  try {
+    accessSync(candidate, constants.X_OK);
+    return candidate;
+  } catch {
+    try {
+      accessSync(candidate, constants.F_OK);
+    } catch {
+      return null;
+    }
+    return /\.(exe|cmd|bat|com)$/i.test(candidate) ? candidate : null;
+  }
+}
+
+function resolveOnPath(name, env) {
   const paths = String(env.PATH || '').split(delimiter).filter(Boolean);
-  const extensions = process.platform === 'win32'
-    ? String(env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';')
-    : [''];
   for (const dir of paths) {
-    for (const extension of extensions) {
-      const candidate = join(dir, `${name}${extension}`);
-      try {
-        accessSync(candidate, constants.X_OK);
-        return candidate;
-      } catch {
-        // try the next candidate
-      }
+    for (const extension of pathExtensions(env)) {
+      const found = executableIfPresent(join(dir, `${name}${extension}`));
+      if (found) return found;
     }
   }
   return null;
 }
 
+function listCraftInstallDirs(root) {
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const dirs = [];
+  for (const entry of entries) {
+    if (dirs.length >= MAX_CRAFT_DIRS_PER_ROOT) break;
+    if (!CRAFT_DIR_RE.test(entry.name)) continue;
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    dirs.push(join(root, entry.name));
+  }
+  return dirs;
+}
+
+function resolveInInstallDir(installDir, name, env) {
+  for (const sub of ['', 'bin']) {
+    const dir = sub ? join(installDir, sub) : installDir;
+    for (const extension of installExtensions(env)) {
+      const found = executableIfPresent(join(dir, `${name}${extension}`));
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function resolveCraftInstall(name, env) {
+  for (const root of craftInstallRoots(env)) {
+    for (const installDir of listCraftInstallDirs(root)) {
+      const found = resolveInInstallDir(installDir, name, env);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+export function isWindowsCraftCli(path) {
+  const value = String(path || '');
+  if (/\.(exe|cmd|bat|com)$/i.test(value)) return true;
+  const posix = posixPath(value);
+  if (/\/mnt\/[a-z]\//i.test(posix)) return true;
+  if (/\/Program Files(?: \(x86\))?\//i.test(posix)) return true;
+  if (/\/AppData\/Local\/Programs\//i.test(posix)) return true;
+  return false;
+}
+
+export function resolveCommand(name, env = process.env, options = {}) {
+  if (!name) return null;
+  if (isAbsolute(name)) return executableIfPresent(name);
+  const fromPath = resolveOnPath(name, env);
+  if (options.pathOnly) return fromPath;
+  const fromInstall = resolveCraftInstall(name, env);
+  if (isWslEnv(env) && fromInstall && isWindowsCraftCli(fromInstall)) return fromInstall;
+  return fromPath || fromInstall;
+}
+
+function shouldAttachCraft(resolved) {
+  return process.platform === 'win32' || isWindowsCraftCli(resolved);
+}
+
+function craftMissingMessage(command) {
+  return `${command} is not on PATH or in a known Craft install location`;
+}
+
+function selectedCraftServer(server, resolved, env) {
+  const fromPath = resolveCommand(server.command, env, { pathOnly: true });
+  const attach = shouldAttachCraft(resolved);
+  const command = !fromPath || resolved !== fromPath ? resolved : server.command;
+  const args = attach ? ['mcp', '--attach', CRAFT_CONTROL_PORT] : [...server.args];
+  return {
+    ...server,
+    command,
+    args,
+    invocation: `${commandBasename(command)} ${args.join(' ')}`
+  };
+}
+
 export function commandBasename(command) {
-  return basename(String(command || '')).replace(/\.exe$/i, '');
+  return basename(String(command || '')).replace(/\.(exe|cmd|bat|com)$/i, '');
 }
 
 function argsList(value) {
@@ -220,11 +408,19 @@ export function isShioriBrainEntry(entry) {
   return arg === SHIORI_BRAIN_MCP_SCRIPT || arg.endsWith(`/${SHIORI_BRAIN_MCP_SCRIPT}`);
 }
 
+function isCraftAttachTarget(value) {
+  const raw = String(value || '');
+  if (raw === CRAFT_CONTROL_PORT) return true;
+  return raw.endsWith(`:${CRAFT_CONTROL_PORT}`);
+}
+
 export function isCraftEntry(entry, commandName) {
   if (!entry || typeof entry !== 'object' || isHttpEntry(entry)) return false;
-  if (commandBasename(entry.command) !== commandName) return false;
+  if (commandBasename(entry.command) !== commandBasename(commandName)) return false;
   const args = argsList(entry.args);
-  return args.length === 1 && args[0] === 'mcp';
+  if (args[0] !== 'mcp') return false;
+  if (args.length === 1) return true;
+  return args.length === 3 && args[1] === '--attach' && isCraftAttachTarget(args[2]);
 }
 
 function archiveEnv(entry) {
@@ -429,7 +625,8 @@ export function selectServersForInstall(catalog, env = process.env) {
       selected.push(server);
       continue;
     }
-    if (resolveCommand(server.command, env)) selected.push(server);
+    const resolved = resolveCommand(server.command, env);
+    if (resolved) selected.push(selectedCraftServer(server, resolved, env));
     else skipped.push(server);
   }
   return { selected, skipped };
@@ -438,7 +635,7 @@ export function selectServersForInstall(catalog, env = process.env) {
 function verifyBinary(server, env) {
   if (!server.whenInstalled) return { ok: true };
   const resolved = resolveCommand(server.command, env);
-  if (!resolved) return { ok: false, message: `${server.command} is not on PATH` };
+  if (!resolved) return { ok: false, message: craftMissingMessage(server.command) };
   try {
     execFileSync(resolved, ['--version'], { timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'], env });
     return { ok: true };
@@ -643,7 +840,7 @@ function resolveJsonConfigPath(home, host) {
 export function planHostMcp(host, home, env, { write, checkout, execFile, archiveUrl }) {
   const catalog = mcpServerCatalog({ checkout, archiveUrl });
   const { selected, skipped } = selectServersForInstall(catalog, env);
-  const reports = skipped.map(server => ({ name: server.name, status: 'skipped', message: `${server.command} is not on PATH` }));
+  const reports = skipped.map(server => ({ name: server.name, status: 'skipped', message: craftMissingMessage(server.command) }));
   const shape = host.jsonShape ?? 'mcpServers';
   const configPath = host.kind === 'json' ? resolveJsonConfigPath(home, host) : join(home, host.configPath);
   if (host.kind !== 'json') {
