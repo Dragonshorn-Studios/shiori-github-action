@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, realpathSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
@@ -1065,6 +1065,23 @@ test('nested ArtCraft/DesignCraft install dirs are found within the per-root lim
   assert.ok(missing.some(item => item.name === 'figcraft'));
 });
 
+test('runMcpCli detect does not require an archive URL', () => {
+  const env = { ...process.env, PATH: '/missing-bin', SHIORI_CRAFT_WSL: '0' };
+  delete env.SHIORI_BRAIN_BASE_URL;
+  const { lines } = runMcpCli(['detect'], { env });
+  assert.ok(lines.some(line => line === MCP_DONE_LINE));
+  assert.ok(lines.some(line => /MCP detect not found:/.test(line)));
+});
+
+test('resolveCommand returns the realpath of a found Craft CLI', async () => {
+  const realRoot = await mkdtemp(join(tmpdir(), 'shiori-pf-real-'));
+  const figcraftPath = await writeNamedCraftCli(join(realRoot, 'FigCraft'), 'figcraft-cli', 'figcraft-cli.exe');
+  const linkRoot = await mkdtemp(join(tmpdir(), 'shiori-pf-link-'));
+  await symlink(join(realRoot, 'FigCraft'), join(linkRoot, 'FigCraft'));
+  const env = craftSearchEnv({ SHIORI_CRAFT_PROGRAM_FILES: linkRoot });
+  assert.equal(resolveCommand('figcraft-cli', env), realpathSync(figcraftPath));
+});
+
 test('detect lists Program Files Craft CLIs without writing', async () => {
   const programFiles = await mkdtemp(join(tmpdir(), 'shiori-pf-'));
   const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
@@ -1208,5 +1225,107 @@ forEachDoctorKind('quiet --install cursor reports Craft MCP added then unchanged
   assert.match(afterNew.stdout, /cursor: MCP wordcraft added/);
   assert.match(afterNew.stdout, /cursor: MCP figcraft unchanged/);
   assert.match(afterNew.stdout, /^updated$/m);
+});
+
+forEachDoctorKind('bare doctor reports Craft CLIs without SHIORI_BRAIN_BASE_URL', async (_t, kind) => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-doctor-'));
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
+  const programFiles = await mkdtemp(join(tmpdir(), 'shiori-pf-'));
+  const upstream = await makeUpstreamRepo({ repository: 'example/project', marketplace: 'project-knowledge' });
+  const gitVars = await writeFakeGit(binDir, upstream);
+  await writeDoctorTree(repositoryRoot, { repository: 'example/project', marketplace: 'project-knowledge' });
+  await writeNamedCraftCli(join(programFiles, 'FigCraft'), 'figcraft-cli', 'figcraft-cli.exe');
+  const env = baseDoctorEnv(home, {
+    binDir,
+    gitEnv: gitVars,
+    extra: {
+      SHIORI_CRAFT_WSL: '0',
+      SHIORI_CRAFT_PROGRAM_FILES: programFiles
+    }
+  });
+  delete env.SHIORI_BRAIN_BASE_URL;
+  const bare = runDoctor(repositoryRoot, {}, { home, env, kind });
+  assert.equal(bare.status, 0, bare.stderr + bare.stdout);
+  assert.match(bare.stdout, /craft: figcraft found/);
+  assert.equal(existsSync(join(home, '.cursor/mcp.json')), false);
+});
+
+forEachDoctorKind('bare doctor ignores an invalid SHIORI_BRAIN_BASE_URL', async (_t, kind) => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-doctor-'));
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
+  const upstream = await makeUpstreamRepo({ repository: 'example/project', marketplace: 'project-knowledge' });
+  const gitVars = await writeFakeGit(binDir, upstream);
+  await writeDoctorTree(repositoryRoot, { repository: 'example/project', marketplace: 'project-knowledge' });
+  const env = baseDoctorEnv(home, {
+    binDir,
+    gitEnv: gitVars,
+    extra: { SHIORI_BRAIN_BASE_URL: 'http://brain.internal/' }
+  });
+  const bare = runDoctor(repositoryRoot, {}, { home, env, kind });
+  assert.equal(bare.status, 0, bare.stderr + bare.stdout);
+  assert.match(bare.stdout, /detected:/);
+  assert.doesNotMatch(`${bare.stdout}\n${bare.stderr}`, /must be an https URL/);
+});
+
+forEachDoctorKind('bare doctor continues when the MCP helper omits MCP done', async (_t, kind) => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-doctor-'));
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
+  const upstream = await makeUpstreamRepo({ repository: 'example/project', marketplace: 'project-knowledge' });
+  const gitVars = await writeFakeGit(binDir, upstream);
+  await writeDoctorTree(repositoryRoot, { repository: 'example/project', marketplace: 'project-knowledge' });
+  const stub = join(repositoryRoot, 'stub-mcp.mjs');
+  await writeFile(stub, 'console.log("MCP detect figcraft found (figcraft-cli mcp)");\n');
+  const env = baseDoctorEnv(home, {
+    binDir,
+    gitEnv: gitVars,
+    extra: { SHIORI_MCP_HELPER: stub }
+  });
+  const bare = runDoctor(repositoryRoot, {}, { home, env, kind });
+  assert.equal(bare.status, 0, bare.stderr + bare.stdout);
+  assert.match(bare.stdout, /Skipping Craft CLI detect: helper produced no status line/);
+  assert.match(bare.stdout, /detected:/);
+});
+
+forEachDoctorKind('install fails when the MCP helper omits MCP done', async (_t, kind) => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-doctor-'));
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
+  const upstream = await makeUpstreamRepo({ repository: 'example/project', marketplace: 'project-knowledge' });
+  const gitVars = await writeFakeGit(binDir, upstream);
+  await writeDoctorTree(repositoryRoot, { repository: 'example/project', marketplace: 'project-knowledge' });
+  await mkdir(join(home, '.cursor'), { recursive: true });
+  const stub = join(repositoryRoot, 'stub-mcp.mjs');
+  await writeFile(stub, 'console.log("MCP cursor shiori-brain added");\n');
+  const env = baseDoctorEnv(home, {
+    binDir,
+    gitEnv: gitVars,
+    extra: { SHIORI_MCP_HELPER: stub }
+  });
+  const result = runDoctor(repositoryRoot, { install: ['cursor'] }, { home, env, kind });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /produced no status line/);
+});
+
+forEachDoctorKind('quiet install prints MCP error reports', async (_t, kind) => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-doctor-'));
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
+  const upstream = await makeUpstreamRepo({ repository: 'example/project', marketplace: 'project-knowledge' });
+  const gitVars = await writeFakeGit(binDir, upstream);
+  await writeDoctorTree(repositoryRoot, { repository: 'example/project', marketplace: 'project-knowledge' });
+  await mkdir(join(home, '.cursor'), { recursive: true });
+  const stub = join(repositoryRoot, 'stub-mcp.mjs');
+  await writeFile(stub, 'console.log("MCP cursor shiori-brain error (get failed)");\nconsole.log("MCP done");\n');
+  const env = baseDoctorEnv(home, {
+    binDir,
+    gitEnv: gitVars,
+    extra: { SHIORI_MCP_HELPER: stub }
+  });
+  const result = runDoctor(repositoryRoot, { install: ['cursor'] }, { home, env, kind });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.match(result.stdout, /cursor: MCP shiori-brain error \(get failed\)/);
 });
 

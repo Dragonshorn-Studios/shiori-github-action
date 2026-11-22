@@ -414,16 +414,10 @@ function craftReportMessage(server) {
 export function detectCraftClis(env = process.env) {
   const found = [];
   const missing = [];
-  for (const app of CRAFT_APPS) {
-    const catalogServer = {
-      name: app.name,
-      command: app.command,
-      args: ['mcp'],
-      whenInstalled: true
-    };
-    const resolved = resolveCommand(app.command, env);
-    if (resolved) found.push(selectedCraftServer(catalogServer, resolved, env));
-    else missing.push(app);
+  for (const server of mcpServerCatalog().filter(item => item.whenInstalled)) {
+    const resolved = resolveCommand(server.command, env);
+    if (resolved) found.push(selectedCraftServer(server, resolved, env));
+    else missing.push(server);
   }
   return { found, missing };
 }

@@ -346,6 +346,7 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(shellDoctor, /run_mcp_cli install --host opencode/);
   assert.match(shellDoctor, /run_mcp_cli detect/);
   assert.match(shellDoctor, /produced no status line/);
+  assert.match(shellDoctor, /Skipping Craft CLI detect/);
   assert.match(shellDoctor, /mcp_configured/);
   assert.match(shellDoctor, /host_detected/);
   assert.match(shellDoctor, /select_detected_hosts/);
@@ -384,6 +385,7 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(powerShellDoctor, /Invoke-McpCli -McpArgs @\('install', '--host', 'opencode'\)/);
   assert.match(powerShellDoctor, /Invoke-McpCli -McpArgs @\('detect'\)/);
   assert.match(powerShellDoctor, /produced no status line/);
+  assert.match(powerShellDoctor, /Skipping Craft CLI detect/);
   assert.match(powerShellDoctor, /Test-McpConfigured/);
   assert.match(powerShellDoctor, /Test-HostDetected/);
   assert.match(powerShellDoctor, /No installable hosts detected/);

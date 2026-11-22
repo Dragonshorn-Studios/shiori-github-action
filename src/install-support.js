@@ -873,7 +873,7 @@ print_quiet_mcp_reports() {
     detail=\${rest#\"$status\"}
     detail=\${detail# }
     case $status in
-      added|updated|unchanged|conflict)
+      added|updated|unchanged|conflict|error)
         if [ -n \"$detail\" ]; then
           printf '%s: MCP %s %s %s\\n' \"$host\" \"$name\" \"$status\" \"$detail\"
         else
@@ -885,22 +885,58 @@ print_quiet_mcp_reports() {
 }
 run_mcp_cli() {
   has_command node || { printf '%s\\n' 'Skipping MCP config: node is not available.'; return 0; }
-  helper=$(resolve_mcp_helper) || return 1
-  pages_origin=$(archive_url) || pages_origin=''
   mcp_cmd=$1
+  detect_or_list=false
+  if [ \"$mcp_cmd\" = detect ] || [ \"$mcp_cmd\" = list ]; then
+    detect_or_list=true
+  fi
+  helper=$(resolve_mcp_helper) || {
+    if [ \"$detect_or_list\" = true ]; then
+      printf '%s\\n' 'Skipping Craft CLI detect: cannot load the Shiori MCP helper.'
+      return 0
+    fi
+    return 1
+  }
+  pages_origin=$(archive_url) || pages_origin=''
   if [ -n \"$pages_origin\" ]; then
-    is_allowed_archive_url \"$pages_origin\" || { printf '%s\\n' 'SHIORI_BRAIN_BASE_URL must be an https URL (http is allowed only for localhost).' >&2; return 1; }
-  elif [ \"$mcp_cmd\" != detect ] && [ \"$mcp_cmd\" != list ]; then
+    if ! is_allowed_archive_url \"$pages_origin\"; then
+      if [ \"$detect_or_list\" = true ]; then
+        pages_origin=''
+      else
+        printf '%s\\n' 'SHIORI_BRAIN_BASE_URL must be an https URL (http is allowed only for localhost).' >&2
+        return 1
+      fi
+    fi
+  elif [ \"$detect_or_list\" != true ]; then
     printf '%s\\n' 'Set SHIORI_BRAIN_BASE_URL to the published Pages origin before installing MCP servers. The installer will not fall back to another project archive.' >&2
     return 1
   fi
   if [ -n \"$pages_origin\" ]; then
-    output=$(node \"$helper\" \"$@\" --home \"$HOME\" --checkout \"$checkout\" --base-url \"$pages_origin\") || return 1
+    output=$(node \"$helper\" \"$@\" --home \"$HOME\" --checkout \"$checkout\" --base-url \"$pages_origin\") || {
+      if [ \"$detect_or_list\" = true ]; then
+        printf '%s\\n' 'Skipping Craft CLI detect: helper failed.'
+        return 0
+      fi
+      return 1
+    }
   else
-    output=$(node \"$helper\" \"$@\" --home \"$HOME\" --checkout \"$checkout\") || return 1
+    output=$(node \"$helper\" \"$@\" --home \"$HOME\" --checkout \"$checkout\") || {
+      if [ \"$detect_or_list\" = true ]; then
+        printf '%s\\n' 'Skipping Craft CLI detect: helper failed.'
+        return 0
+      fi
+      return 1
+    }
   fi
   last_line=$(printf '%s\\n' \"$output\" | tail -n 1)
-  [ \"$last_line\" = 'MCP done' ] || { printf '%s\\n' 'Shiori MCP helper produced no status line.' >&2; return 1; }
+  if [ \"$last_line\" != 'MCP done' ]; then
+    if [ \"$detect_or_list\" = true ]; then
+      printf '%s\\n' 'Skipping Craft CLI detect: helper produced no status line.'
+      return 0
+    fi
+    printf '%s\\n' 'Shiori MCP helper produced no status line.' >&2
+    return 1
+  fi
   mcp_ran='true'
   mcp_output=\"$mcp_output
 $output\"
@@ -1484,7 +1520,7 @@ function Write-QuietMcpReports {
     param([string[]]$Lines)
     foreach ($Line in $Lines) {
         if (-not $Line -or $Line -eq 'MCP done' -or $Line.StartsWith('MCP detect ')) { continue }
-        if ($Line -match '^MCP (\\S+) (\\S+) (added|updated|unchanged|conflict)(?: (.*))?$') {
+        if ($Line -match '^MCP (\\S+) (\\S+) (added|updated|unchanged|conflict|error)(?: (.*))?$') {
             $Suffix = if ($Matches[4]) { ' ' + $Matches[4] } else { '' }
             Write-Output (\"$($Matches[1]): MCP $($Matches[2]) $($Matches[3])$Suffix\")
         }
@@ -1501,15 +1537,37 @@ function Invoke-McpCli {
     $McpCommand = $McpArgs[0]
     $Detect = $McpCommand -in @('detect', 'list')
     if (-not $ArchiveUrl -and -not $Detect) { throw 'Set SHIORI_BRAIN_BASE_URL to the published Pages origin before installing MCP servers. The installer will not fall back to another project''s archive.' }
-    if ($ArchiveUrl -and -not (Test-ShioriArchiveUrl $ArchiveUrl)) { throw 'SHIORI_BRAIN_BASE_URL must be an https URL (http is allowed only for localhost).' }
-    $Helper = Get-McpHelper
+    if ($ArchiveUrl -and -not (Test-ShioriArchiveUrl $ArchiveUrl)) {
+        if ($Detect) { $ArchiveUrl = '' } else { throw 'SHIORI_BRAIN_BASE_URL must be an https URL (http is allowed only for localhost).' }
+    }
+    try {
+        $Helper = Get-McpHelper
+    } catch {
+        if ($Detect) {
+            Write-Output 'Skipping Craft CLI detect: cannot load the Shiori MCP helper.'
+            return
+        }
+        throw
+    }
     if ($ArchiveUrl) {
         $Lines = @(& node $Helper @McpArgs --home $HOME --checkout $ManagedCheckout --base-url $ArchiveUrl)
     } else {
         $Lines = @(& node $Helper @McpArgs --home $HOME --checkout $ManagedCheckout)
     }
-    if ($LASTEXITCODE -ne 0) { throw \"Shiori MCP helper failed with exit code $LASTEXITCODE\" }
-    if (-not ($Lines | Where-Object { $_ -eq 'MCP done' })) { throw 'Shiori MCP helper produced no status line.' }
+    if ($LASTEXITCODE -ne 0) {
+        if ($Detect) {
+            Write-Output 'Skipping Craft CLI detect: helper failed.'
+            return
+        }
+        throw \"Shiori MCP helper failed with exit code $LASTEXITCODE\"
+    }
+    if (-not ($Lines | Where-Object { $_ -eq 'MCP done' })) {
+        if ($Detect) {
+            Write-Output 'Skipping Craft CLI detect: helper produced no status line.'
+            return
+        }
+        throw 'Shiori MCP helper produced no status line.'
+    }
     $script:McpRan = $true
     $script:McpLines += $Lines
     if ($Lines | Where-Object { $_ -match '^MCP \\S+ \\S+ (added|updated)( |$|\\()' }) { $script:McpChanged = $true }
