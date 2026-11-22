@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { githubPagesUrl, MCP_HOSTS, renderMcpMarkdownTable } from './mcp-config.js';
 
-const CRAFT_MCP_HELP = 'Craft CLIs are found on PATH or in bounded Program Files / LocalAppData *Craft* installs, including one nested *Craft* directory (WSL: /mnt/c). Windows and WSL use <name>-cli mcp --attach 7979. A bare run reports which Craft CLIs were found without writing MCP config.';
+const CRAFT_MCP_HELP = 'Craft CLIs are found on PATH or in bounded Program Files / LocalAppData *Craft* installs, including one nested *Craft* directory (WSL: /mnt/c Program Files; LocalAppData only if SHIORI_CRAFT_LOCALAPPDATA is set). Windows and WSL use <name>-cli mcp --attach 7979. A bare run reports which Craft CLIs were found without writing MCP config.';
 
 const DEFAULT_REPOSITORY = 'Dragonshorn-Studios/shiori-brain';
 
@@ -726,7 +726,7 @@ ${renderNativeSetupTable(repository)}
 
 ## MCP servers
 
-The doctor can add a local stdio MCP client for the published Pages archive, plus Storytold Craft CLIs found on \`PATH\` or in a bounded Windows install search (\`Program Files\\*Craft*\`, \`Program Files (x86)\\*Craft*\`, \`%LOCALAPPDATA%\\Programs\\*Craft*\`, one nested \`*Craft*\` directory such as \`ArtCraft\\DesignCraft\`, and the WSL \`/mnt/c\` equivalents). The catalog includes DesignCraft, SolidCraft, and VectorCraft. Default doctor mode is still read-only, does not launch Claude or Codex, and reports each Craft CLI the helper found. MCP writes happen only under \`--install\` / \`--update\`: Cursor via \`~/.cursor/mcp.json\`, Devin via \`~/.config/devin/mcp_config.json\`, OpenCode via \`~/.config/opencode/opencode.jsonc\` (\`mcp.servers\`; an existing \`opencode.json\` is updated in place instead. Fresh installs choose \`.jsonc\` so other tools' flat-schema OpenCode imports do not misread the file), Claude Code via \`claude mcp add -s user\`, and Codex via \`codex mcp add\`. Quiet install output names each added, updated, unchanged, or conflicting MCP server. The shiori-brain server is \`node <checkout>/packages/shiori-brain-mcp/src/index.js\` from the managed checkout; it is not loaded from a package registry. Installed entries set \`SHIORI_BRAIN_BASE_URL\` to this project's Pages origin (\`${archiveUrl || 'https://<owner>.github.io/<repo>/'}\`). Override with \`SHIORI_BRAIN_BASE_URL\` if Pages uses a custom domain. The installer fails instead of using another project's archive when that URL cannot be determined. Existing non-Shiori MCP entries are never overwritten.
+The doctor can add a local stdio MCP client for the published Pages archive, plus Storytold Craft CLIs found on \`PATH\` or in a bounded Windows install search (\`Program Files\\*Craft*\`, \`Program Files (x86)\\*Craft*\`, \`%LOCALAPPDATA%\\Programs\\*Craft*\`, one nested \`*Craft*\` directory such as \`ArtCraft\\DesignCraft\`, and the WSL \`/mnt/c\` Program Files trees). Under WSL, set \`SHIORI_CRAFT_LOCALAPPDATA\` to scan that Windows profile's \`Programs\\*Craft*\` directory; other users' profiles are not scanned. The catalog includes DesignCraft, SolidCraft, and VectorCraft. Default doctor mode is still read-only, does not launch Claude or Codex, and reports each Craft CLI the helper found. MCP writes happen only under \`--install\` / \`--update\`: Cursor via \`~/.cursor/mcp.json\`, Devin via \`~/.config/devin/mcp_config.json\`, OpenCode via \`~/.config/opencode/opencode.jsonc\` (\`mcp.servers\`; an existing \`opencode.json\` is updated in place instead. Fresh installs choose \`.jsonc\` so other tools' flat-schema OpenCode imports do not misread the file), Claude Code via \`claude mcp add -s user\`, and Codex via \`codex mcp add\`. Quiet install output names each added, updated, unchanged, or conflicting MCP server. The shiori-brain server is \`node <checkout>/packages/shiori-brain-mcp/src/index.js\` from the managed checkout; it is not loaded from a package registry. Installed entries set \`SHIORI_BRAIN_BASE_URL\` to this project's Pages origin (\`${archiveUrl || 'https://<owner>.github.io/<repo>/'}\`). Override with \`SHIORI_BRAIN_BASE_URL\` if Pages uses a custom domain. The installer fails instead of using another project's archive when that URL cannot be determined. Existing non-Shiori MCP entries are never overwritten.
 
 On Windows and in WSL, detected Craft CLIs are configured as \`<name>-cli mcp --attach 7979\` so a host can drive the running desktop app (start it with \`figcraft --control 7979\`). In WSL the doctor prefers the Windows \`.exe\` via WSL interop, because the control channel binds \`127.0.0.1\` on the Windows host and a Linux-side localhost may not reach it. Elsewhere the doctor keeps headless \`<name>-cli mcp\`.
 
@@ -794,7 +794,7 @@ resolve_mcp_helper() {
     printf '%s\\n' \"$SHIORI_MCP_HELPER\"
     return 0
   fi
-  if [ -f 'scripts/shiori-mcp.mjs' ]; then
+  if [ \"$context\" = checkout ] && [ -f 'scripts/shiori-mcp.mjs' ]; then
     printf '%s\\n' 'scripts/shiori-mcp.mjs'
     return 0
   fi
@@ -911,23 +911,17 @@ run_mcp_cli() {
     printf '%s\\n' 'Set SHIORI_BRAIN_BASE_URL to the published Pages origin before installing MCP servers. The installer will not fall back to another project archive.' >&2
     return 1
   fi
+  set -- \"$@\" --home \"$HOME\" --checkout \"$checkout\"
   if [ -n \"$pages_origin\" ]; then
-    output=$(node \"$helper\" \"$@\" --home \"$HOME\" --checkout \"$checkout\" --base-url \"$pages_origin\") || {
-      if [ \"$detect_or_list\" = true ]; then
-        printf '%s\\n' 'Skipping Craft CLI detect: helper failed.'
-        return 0
-      fi
-      return 1
-    }
-  else
-    output=$(node \"$helper\" \"$@\" --home \"$HOME\" --checkout \"$checkout\") || {
-      if [ \"$detect_or_list\" = true ]; then
-        printf '%s\\n' 'Skipping Craft CLI detect: helper failed.'
-        return 0
-      fi
-      return 1
-    }
+    set -- \"$@\" --base-url \"$pages_origin\"
   fi
+  output=$(node \"$helper\" \"$@\") || {
+    if [ \"$detect_or_list\" = true ]; then
+      printf '%s\\n' 'Skipping Craft CLI detect: helper failed.'
+      return 0
+    fi
+    return 1
+  }
   last_line=$(printf '%s\\n' \"$output\" | tail -n 1)
   if [ \"$last_line\" != 'MCP done' ]; then
     if [ \"$detect_or_list\" = true ]; then
@@ -1468,14 +1462,14 @@ $script:McpLines = @()
 $script:CheckoutLine = ''
 if ($env:SHIORI_VERBOSE -and $env:SHIORI_VERBOSE -notin @('0', 'false')) { $Verbose = $true }
 $script:Verbose = [bool]$Verbose
-$McpHelperTemp = $null
+$script:McpHelperTemp = $null
 $LocalCheckout = (Test-Path -LiteralPath '.agents\\skills') -and (Test-Path -LiteralPath 'plugins\\shiori')
 $Mode = if ($LocalCheckout) { 'checkout' } else { 'remote' }
 $ProjectHint = if ($LocalCheckout) { 'project adapters are ready in this checkout' } else { 'no Shiori checkout detected; use a marketplace installation below' }
 
 function Get-McpHelper {
     if ($env:SHIORI_MCP_HELPER -and (Test-Path -LiteralPath $env:SHIORI_MCP_HELPER)) { return $env:SHIORI_MCP_HELPER }
-    if (Test-Path -LiteralPath 'scripts\\shiori-mcp.mjs') { return (Resolve-Path -LiteralPath 'scripts\\shiori-mcp.mjs').Path }
+    if ($LocalCheckout -and (Test-Path -LiteralPath 'scripts\\shiori-mcp.mjs')) { return (Resolve-Path -LiteralPath 'scripts\\shiori-mcp.mjs').Path }
     $script:McpHelperTemp = Join-Path ([IO.Path]::GetTempPath()) ('shiori-mcp-' + [guid]::NewGuid().ToString() + '.mjs')
     Invoke-WebRequest -UseBasicParsing -Uri \"https://raw.githubusercontent.com/$Repository/main/scripts/shiori-mcp.mjs\" -OutFile $script:McpHelperTemp
     return $script:McpHelperTemp
@@ -1541,40 +1535,46 @@ function Invoke-McpCli {
         if ($Detect) { $ArchiveUrl = '' } else { throw 'SHIORI_BRAIN_BASE_URL must be an https URL (http is allowed only for localhost).' }
     }
     try {
-        $Helper = Get-McpHelper
-    } catch {
-        if ($Detect) {
-            Write-Output 'Skipping Craft CLI detect: cannot load the Shiori MCP helper.'
-            return
+        try {
+            $Helper = Get-McpHelper
+        } catch {
+            if ($Detect) {
+                Write-Output 'Skipping Craft CLI detect: cannot load the Shiori MCP helper.'
+                return
+            }
+            throw
         }
-        throw
-    }
-    if ($ArchiveUrl) {
-        $Lines = @(& node $Helper @McpArgs --home $HOME --checkout $ManagedCheckout --base-url $ArchiveUrl)
-    } else {
-        $Lines = @(& node $Helper @McpArgs --home $HOME --checkout $ManagedCheckout)
-    }
-    if ($LASTEXITCODE -ne 0) {
-        if ($Detect) {
-            Write-Output 'Skipping Craft CLI detect: helper failed.'
-            return
+        $HelperArgs = @($McpArgs + @('--home', $HOME, '--checkout', $ManagedCheckout))
+        if ($ArchiveUrl) { $HelperArgs += @('--base-url', $ArchiveUrl) }
+        $Lines = @(& node $Helper @HelperArgs)
+        if ($LASTEXITCODE -ne 0) {
+            if ($Detect) {
+                Write-Output 'Skipping Craft CLI detect: helper failed.'
+                return
+            }
+            throw \"Shiori MCP helper failed with exit code $LASTEXITCODE\"
         }
-        throw \"Shiori MCP helper failed with exit code $LASTEXITCODE\"
-    }
-    if (-not ($Lines | Where-Object { $_ -eq 'MCP done' })) {
-        if ($Detect) {
-            Write-Output 'Skipping Craft CLI detect: helper produced no status line.'
-            return
+        $LastLine = if ($Lines.Count -gt 0) { [string]$Lines[$Lines.Count - 1] } else { '' }
+        if ($LastLine -ne 'MCP done') {
+            if ($Detect) {
+                Write-Output 'Skipping Craft CLI detect: helper produced no status line.'
+                return
+            }
+            throw 'Shiori MCP helper produced no status line.'
         }
-        throw 'Shiori MCP helper produced no status line.'
-    }
-    $script:McpRan = $true
-    $script:McpLines += $Lines
-    if ($Lines | Where-Object { $_ -match '^MCP \\S+ \\S+ (added|updated)( |$|\\()' }) { $script:McpChanged = $true }
-    if ($Detect) {
-        Write-McpDetectLines -Lines $Lines
-    } elseif ($script:Verbose) {
-        $Lines | Where-Object { $_ -ne 'MCP done' } | ForEach-Object { Write-Host $_ }
+        $script:McpRan = $true
+        $script:McpLines += $Lines
+        if ($Lines | Where-Object { $_ -match '^MCP \\S+ \\S+ (added|updated)( |$|\\()' }) { $script:McpChanged = $true }
+        if ($Detect) {
+            Write-McpDetectLines -Lines $Lines
+        } elseif ($script:Verbose) {
+            $Lines | Where-Object { $_ -ne 'MCP done' } | ForEach-Object { Write-Host $_ }
+        }
+    } finally {
+        if ($script:McpHelperTemp) {
+            Remove-Item -LiteralPath $script:McpHelperTemp -Force -ErrorAction SilentlyContinue
+            $script:McpHelperTemp = $null
+        }
     }
 }
 

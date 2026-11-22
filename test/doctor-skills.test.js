@@ -84,7 +84,8 @@ test('one host map generates sh, ps1, and the guide host table', () => {
   assert.match(ps1, /could not remove leftover skill temp \$LeftoverPath/);
   assert.doesNotMatch(ps1, /could not remove leftover skill temp \$\(\$_\.FullName\)/);
   assert.match(ps1, /could not remove obsolete skill link \$OldTarget/);
-  assert.doesNotMatch(ps1, /Remove-Item/);
+  assert.match(ps1, /Remove-Item -LiteralPath \$script:McpHelperTemp -Force -ErrorAction SilentlyContinue/);
+  assert.equal([...ps1.matchAll(/Remove-Item/g)].length, 1);
   assert.equal(SKILL_DESTINATIONS.agents.homePath, '.agents/skills');
   assert.equal(SKILL_DESTINATIONS.claude.homePath, '.claude/skills');
   for (const host of installableDoctorHosts()) {

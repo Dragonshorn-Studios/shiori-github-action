@@ -160,6 +160,8 @@ export async function writeDoctorTree(workDir, options = {}) {
     await mkdir(join(workDir, dirname(path)), { recursive: true });
     await writeFile(join(workDir, path), content, path.endsWith('.sh') ? { mode: 0o755 } : undefined);
   }
+  await mkdir(join(workDir, '.agents/skills'), { recursive: true });
+  await mkdir(join(workDir, 'plugins/shiori'), { recursive: true });
   return files;
 }
 
@@ -216,8 +218,9 @@ function psArgs(operation) {
   return operation.rest || [];
 }
 
-export function runDoctor(workDir, operation, { kind, home, env, timeout = 30000 } = {}) {
+export function runDoctor(workDir, operation, { kind, home, env, timeout = 30000, cwd } = {}) {
   const resolvedKind = kind || (isWindows ? 'ps1' : 'sh');
+  const runCwd = cwd || workDir;
   if (resolvedKind === 'ps1') {
     if (!PWSH) throw new Error('pwsh is required to run generated shiori-doctor.ps1 tests');
     const script = join(workDir, 'scripts/shiori-doctor.ps1');
@@ -225,7 +228,7 @@ export function runDoctor(workDir, operation, { kind, home, env, timeout = 30000
     if (isWindows) args.push('-ExecutionPolicy', 'Bypass');
     args.push('-File', script, ...psArgs(operation));
     const result = spawnSync(PWSH, args, {
-      cwd: workDir,
+      cwd: runCwd,
       env,
       encoding: 'utf8',
       timeout,
@@ -241,7 +244,7 @@ export function runDoctor(workDir, operation, { kind, home, env, timeout = 30000
   }
   const script = join(workDir, 'scripts/shiori-doctor.sh');
   const result = spawnSync('sh', [script, ...shArgs(operation)], {
-    cwd: workDir,
+    cwd: runCwd,
     env,
     encoding: 'utf8',
     timeout,

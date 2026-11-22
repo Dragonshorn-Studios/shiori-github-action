@@ -322,6 +322,7 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(setupGuide, /Program Files/);
   assert.match(setupGuide, /ArtCraft/);
   assert.match(setupGuide, /DesignCraft/);
+  assert.match(setupGuide, /SHIORI_CRAFT_LOCALAPPDATA/);
   assert.match(setupGuide, /claude mcp add -s user/);
   assert.match(setupGuide, /Consult shiori-brain on demand/);
   assert.doesNotMatch(setupGuide, /npx -y shiori-brain-mcp/);
@@ -345,6 +346,8 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(shellDoctor, /run_mcp_cli install --host devin/);
   assert.match(shellDoctor, /run_mcp_cli install --host opencode/);
   assert.match(shellDoctor, /run_mcp_cli detect/);
+  assert.match(shellDoctor, /\[ \"\$context\" = checkout \] && \[ -f 'scripts\/shiori-mcp.mjs' \]/);
+  assert.match(shellDoctor, /set -- \"\$@\" --home \"\$HOME\" --checkout \"\$checkout\"/);
   assert.match(shellDoctor, /produced no status line/);
   assert.match(shellDoctor, /Skipping Craft CLI detect/);
   assert.match(shellDoctor, /mcp_configured/);
@@ -374,7 +377,11 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(powerShellDoctor, /\[IO\.Directory\]::Delete/);
   assert.match(powerShellDoctor, /\[IO\.File\]::Delete/);
   assert.match(powerShellDoctor, /FileAttributes\]::ReparsePoint/);
-  assert.doesNotMatch(powerShellDoctor, /Remove-Item/);
+  assert.match(powerShellDoctor, /Remove-Item -LiteralPath \$script:McpHelperTemp -Force -ErrorAction SilentlyContinue/);
+  assert.equal([...powerShellDoctor.matchAll(/Remove-Item/g)].length, 1);
+  assert.match(powerShellDoctor, /\$LocalCheckout -and \(Test-Path -LiteralPath 'scripts\\shiori-mcp.mjs'\)/);
+  assert.match(powerShellDoctor, /\$LastLine -ne 'MCP done'/);
+  assert.match(powerShellDoctor, /\$HelperArgs = @\(\$McpArgs \+ @\('--home', \$HOME, '--checkout', \$ManagedCheckout\)\)/);
   assert.match(powerShellDoctor, /ClaudeSkillsRoot/);
   assert.match(powerShellDoctor, /Test-RecordedHost/);
   assert.match(powerShellDoctor, /Add-RecordedHost codex/);
@@ -391,11 +398,11 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(powerShellDoctor, /No installable hosts detected/);
   assert.doesNotMatch(powerShellDoctor, /Pass at least one installer/);
   assert.doesNotMatch(powerShellDoctor, /Invoke-McpCli -McpArgs @\('verify'\)/);
-  assert.match(powerShellDoctor, /--base-url \$ArchiveUrl/);
+  assert.match(powerShellDoctor, /'--base-url', \$ArchiveUrl/);
   assert.match(powerShellDoctor, /A read-only run does not launch host CLIs/);
   assert.match(powerShellDoctor, /--attach 7979/);
   assert.match(powerShellDoctor, /Program Files/);
-  assert.match(powerShellDoctor, /--checkout \$ManagedCheckout/);
+  assert.match(powerShellDoctor, /'--checkout', \$ManagedCheckout/);
   assert.match(powerShellDoctor, /packages\/shiori-brain-mcp\/src\/index.js/);
   const helper = await readFile(join(repositoryRoot, 'scripts/shiori-mcp.mjs'), 'utf8');
   assert.match(helper, /figcraft-cli/);
@@ -404,6 +411,9 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(helper, /vectorcraft-cli/);
   assert.match(helper, /MCP done/);
   assert.match(helper, /realpathSync/);
+  assert.match(helper, /SHIORI_CRAFT_LOCALAPPDATA/);
+  assert.doesNotMatch(helper, /MAX_WSL_USERS/);
+  assert.doesNotMatch(helper, /SKIP_WSL_USERS/);
   assert.match(helper, /packages\/shiori-brain-mcp\/src\/index.js/);
   assert.doesNotMatch(helper, /npx -y shiori-brain-mcp/);
   await readFile(join(repositoryRoot, 'packages/shiori-brain-mcp/src/index.js'), 'utf8');

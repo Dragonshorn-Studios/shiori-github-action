@@ -15,8 +15,6 @@ const BLOCK_START = '<!-- shiori:start -->';
 const BLOCK_END = '<!-- shiori:end -->';
 const CRAFT_DIR_RE = /craft/i;
 const MAX_CRAFT_DIRS_PER_ROOT = 32;
-const MAX_WSL_USERS = 16;
-const SKIP_WSL_USERS = new Set(['public', 'default', 'default user', 'all users', 'defaultuser0']);
 
 export const CRAFT_APPS = [
   { name: 'figcraft', command: 'figcraft-cli', summary: 'Interface design (FigCraft)' },
@@ -167,7 +165,7 @@ export function renderMcpMarkdownTable() {
   ];
   for (const server of mcpServerCatalog()) {
     const when = server.whenInstalled
-      ? `When \`${server.command}\` is on \`PATH\` or in a bounded Program Files / LocalAppData \`*Craft*\` install (including WSL \`/mnt/c\`). Windows and WSL use \`${server.command} mcp --attach ${CRAFT_CONTROL_PORT}\``
+      ? `When \`${server.command}\` is on \`PATH\` or in a bounded Program Files / LocalAppData \`*Craft*\` install (WSL: \`/mnt/c\` Program Files; LocalAppData only if \`SHIORI_CRAFT_LOCALAPPDATA\` is set). Windows and WSL use \`${server.command} mcp --attach ${CRAFT_CONTROL_PORT}\``
       : 'On `--install` / `--update` for Cursor, Devin, OpenCode, Claude Code, and Codex';
     rows.push(`| \`${server.name}\` | \`${server.invocation}\` | ${server.summary} | ${when} |`);
   }
@@ -218,43 +216,20 @@ function uniqueRoots(values) {
   return roots;
 }
 
-function wslLocalAppDataProgramRoots(usersRoot, env) {
-  const roots = [];
-  const hinted = env.USERNAME || env.USER;
-  if (hinted && !SKIP_WSL_USERS.has(String(hinted).toLowerCase())) {
-    roots.push(join(usersRoot, hinted, 'AppData', 'Local', 'Programs'));
-  }
-  let entries = [];
-  try {
-    entries = readdirSync(usersRoot, { withFileTypes: true });
-  } catch {
-    return roots;
-  }
-  let count = 0;
-  for (const entry of entries) {
-    if (count >= MAX_WSL_USERS) break;
-    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-    if (entry.name.startsWith('.') || SKIP_WSL_USERS.has(entry.name.toLowerCase())) continue;
-    roots.push(join(usersRoot, entry.name, 'AppData', 'Local', 'Programs'));
-    count += 1;
-  }
-  return roots;
-}
-
 export function craftInstallRoots(env = process.env) {
   const programFiles = env.SHIORI_CRAFT_PROGRAM_FILES || env.ProgramFiles;
   const programFilesX86 = env.SHIORI_CRAFT_PROGRAM_FILES_X86 || env['ProgramFiles(x86)'];
-  const localAppData = env.SHIORI_CRAFT_LOCALAPPDATA || env.LOCALAPPDATA;
+  const wsl = isWslEnv(env);
+  const localAppData = wsl ? env.SHIORI_CRAFT_LOCALAPPDATA : (env.SHIORI_CRAFT_LOCALAPPDATA || env.LOCALAPPDATA);
   const roots = [];
   if (programFiles) roots.push(programFiles);
   if (programFilesX86) roots.push(programFilesX86);
   if (localAppData) roots.push(join(localAppData, 'Programs'));
 
-  const wslRoot = usableRoot(env.SHIORI_CRAFT_WSL_WINDOWS_ROOT) || (isWslEnv(env) ? '/mnt/c' : '');
+  const wslRoot = usableRoot(env.SHIORI_CRAFT_WSL_WINDOWS_ROOT) || (wsl ? '/mnt/c' : '');
   if (wslRoot) {
     roots.push(join(wslRoot, 'Program Files'));
     roots.push(join(wslRoot, 'Program Files (x86)'));
-    roots.push(...wslLocalAppDataProgramRoots(join(wslRoot, 'Users'), env));
   }
   return uniqueRoots(roots);
 }
@@ -281,25 +256,17 @@ function installExtensions(env) {
   return extensions;
 }
 
-function canonicalizeExecutable(path) {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
-}
-
 function executableIfPresent(candidate) {
   try {
     accessSync(candidate, constants.X_OK);
-    return canonicalizeExecutable(candidate);
+    return candidate;
   } catch {
     try {
       accessSync(candidate, constants.F_OK);
     } catch {
       return null;
     }
-    return /\.(exe|cmd|bat|com)$/i.test(candidate) ? canonicalizeExecutable(candidate) : null;
+    return /\.(exe|cmd|bat|com)$/i.test(candidate) ? candidate : null;
   }
 }
 
@@ -474,9 +441,28 @@ function archiveEnv(entry) {
   }
 }
 
+function normalizeFsPath(value) {
+  return posixPath(String(value || '')).replace(/^\\\\\?\\/, '').replace(/\/+$/, '');
+}
+
+function sameExecutable(left, right) {
+  const a = String(left || '');
+  const b = String(right || '');
+  if (a === b) return true;
+  if (commandBasename(a) !== commandBasename(b)) return false;
+  if (!isAbsolute(a) || !isAbsolute(b)) return true;
+  try {
+    const leftKey = normalizeFsPath(realpathSync(a));
+    const rightKey = normalizeFsPath(realpathSync(b));
+    return process.platform === 'win32' ? leftKey.toLowerCase() === rightKey.toLowerCase() : leftKey === rightKey;
+  } catch {
+    return false;
+  }
+}
+
 export function entriesEquivalent(existing, desired) {
   if (!existing || !desired) return false;
-  if (commandBasename(existing.command) !== commandBasename(desired.command)) return false;
+  if (!sameExecutable(existing.command, desired.command)) return false;
   const existingArgs = argsList(existing.args);
   const desiredArgs = argsList(desired.args);
   if (existingArgs.length !== desiredArgs.length) return false;
