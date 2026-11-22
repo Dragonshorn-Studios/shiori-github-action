@@ -160,6 +160,8 @@ export async function writeDoctorTree(workDir, options = {}) {
     await mkdir(join(workDir, dirname(path)), { recursive: true });
     await writeFile(join(workDir, path), content, path.endsWith('.sh') ? { mode: 0o755 } : undefined);
   }
+  await mkdir(join(workDir, '.agents/skills'), { recursive: true });
+  await mkdir(join(workDir, 'plugins/shiori'), { recursive: true });
   return files;
 }
 
@@ -216,8 +218,9 @@ function psArgs(operation) {
   return operation.rest || [];
 }
 
-export function runDoctor(workDir, operation, { kind, home, env, timeout = 30000 } = {}) {
+export function runDoctor(workDir, operation, { kind, home, env, timeout = 30000, cwd } = {}) {
   const resolvedKind = kind || (isWindows ? 'ps1' : 'sh');
+  const runCwd = cwd || workDir;
   if (resolvedKind === 'ps1') {
     if (!PWSH) throw new Error('pwsh is required to run generated shiori-doctor.ps1 tests');
     const script = join(workDir, 'scripts/shiori-doctor.ps1');
@@ -225,7 +228,7 @@ export function runDoctor(workDir, operation, { kind, home, env, timeout = 30000
     if (isWindows) args.push('-ExecutionPolicy', 'Bypass');
     args.push('-File', script, ...psArgs(operation));
     const result = spawnSync(PWSH, args, {
-      cwd: workDir,
+      cwd: runCwd,
       env,
       encoding: 'utf8',
       timeout,
@@ -241,7 +244,7 @@ export function runDoctor(workDir, operation, { kind, home, env, timeout = 30000
   }
   const script = join(workDir, 'scripts/shiori-doctor.sh');
   const result = spawnSync('sh', [script, ...shArgs(operation)], {
-    cwd: workDir,
+    cwd: runCwd,
     env,
     encoding: 'utf8',
     timeout,
@@ -331,28 +334,50 @@ export function isLink(path) {
   }
 }
 
+function windowsFullName(path) {
+  const literal = String(path || '').replaceAll("'", "''");
+  if (!literal) return '';
+  const shell = PWSH || 'powershell.exe';
+  const result = spawnSync(shell, [
+    '-NoProfile',
+    '-NonInteractive',
+    '-Command',
+    `if (Test-Path -LiteralPath '${literal}') { (Get-Item -LiteralPath '${literal}').FullName } else { [IO.Path]::GetFullPath('${literal}') }`
+  ], { encoding: 'utf8', windowsHide: true });
+  return String(result.stdout || '').trim().split(/\r?\n/).find(item => item.trim()) || '';
+}
+
+export function canonicalPath(value) {
+  const raw = String(value || '').trim().replace(/^\\\\\?\\/, '');
+  if (!raw) return '';
+  const expand = isWindows ? (windowsFullName(raw) || raw) : raw;
+  try {
+    return realpathSync(expand).replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
+  } catch {
+    return expand.replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
+  }
+}
+
 export function samePath(left, right) {
-  const normalize = (value) => {
-    const raw = String(value || '').replaceAll('\\', '/').replace(/\/$/, '');
-    try {
-      return realpathSync(raw).replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
-    } catch {
-      return raw.toLowerCase();
-    }
-  };
-  return normalize(left) === normalize(right);
+  return canonicalPath(left) === canonicalPath(right);
 }
 
 export function skillLinkTarget(path) {
-  if (isWindows) {
-    const result = spawnSync('powershell.exe', [
-      '-NoProfile',
-      '-Command',
-      `(Get-Item -LiteralPath '${path.replaceAll("'", "''")}').Target`
-    ], { encoding: 'utf8' });
-    return String(result.stdout || '').trim();
+  try {
+    return realpathSync(path);
+  } catch {
+    if (isWindows) {
+      const shell = PWSH || 'powershell.exe';
+      const result = spawnSync(shell, [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `[string]@((Get-Item -LiteralPath '${path.replaceAll("'", "''")}').Target)[0]`
+      ], { encoding: 'utf8', windowsHide: true });
+      return String(result.stdout || '').trim();
+    }
+    return readlinkSync(path);
   }
-  return readlinkSync(path);
 }
 
 export function checkoutSkills(home, name) {

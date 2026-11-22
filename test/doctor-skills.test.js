@@ -84,7 +84,8 @@ test('one host map generates sh, ps1, and the guide host table', () => {
   assert.match(ps1, /could not remove leftover skill temp \$LeftoverPath/);
   assert.doesNotMatch(ps1, /could not remove leftover skill temp \$\(\$_\.FullName\)/);
   assert.match(ps1, /could not remove obsolete skill link \$OldTarget/);
-  assert.doesNotMatch(ps1, /Remove-Item/);
+  assert.match(ps1, /Remove-Item -LiteralPath \$script:McpHelperTemp -Force -ErrorAction SilentlyContinue/);
+  assert.equal([...ps1.matchAll(/Remove-Item/g)].length, 1);
   assert.equal(SKILL_DESTINATIONS.agents.homePath, '.agents/skills');
   assert.equal(SKILL_DESTINATIONS.claude.homePath, '.claude/skills');
   for (const host of installableDoctorHosts()) {
@@ -335,7 +336,9 @@ test('ps1 leftover real directory under the temp prefix is not deleted', {
 });
 
 test('ps1 leftover skill temp that cannot be removed warns and install continues', {
-  skip: PWSH ? false : 'pwsh must be on PATH so ubuntu-latest can run generated shiori-doctor.ps1'
+  skip: isWindows
+    ? 'NTFS ignores POSIX chmod for deletes'
+    : (PWSH ? false : 'pwsh must be on PATH so ubuntu-latest can run generated shiori-doctor.ps1')
 }, async () => {
   const { workDir, home, env } = await setupDoctor();
   const first = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind: 'ps1' });
@@ -356,7 +359,9 @@ test('ps1 leftover skill temp that cannot be removed warns and install continues
 });
 
 test('ps1 obsolete skill link that cannot be removed warns and install continues', {
-  skip: PWSH ? false : 'pwsh must be on PATH so ubuntu-latest can run generated shiori-doctor.ps1'
+  skip: isWindows
+    ? 'NTFS ignores POSIX chmod for deletes'
+    : (PWSH ? false : 'pwsh must be on PATH so ubuntu-latest can run generated shiori-doctor.ps1')
 }, async () => {
   const { workDir, home, env } = await setupDoctor();
   const first = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind: 'ps1' });

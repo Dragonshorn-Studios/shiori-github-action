@@ -28,6 +28,7 @@ const EXPECTED_INSTALL = `checkout: cloned <sha>
 detected: cursor
 cursor: skills -> ~/.agents/skills
 cursor: MCP -> ~/.cursor/mcp.json
+cursor: MCP shiori-brain added
 updated
 `;
 
@@ -35,6 +36,7 @@ const EXPECTED_UPDATE = `checkout: already up to date <sha>
 detected: cursor
 cursor: skills -> ~/.agents/skills
 cursor: MCP -> ~/.cursor/mcp.json
+cursor: MCP shiori-brain unchanged
 already current
 `;
 
