@@ -3,6 +3,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { githubPagesUrl, MCP_HOSTS, renderMcpMarkdownTable } from './mcp-config.js';
 
+const CRAFT_MCP_HELP = 'Craft CLIs are found on PATH or in bounded Program Files / LocalAppData *Craft* installs (WSL: /mnt/c). Windows and WSL use <name>-cli mcp --attach 7979.';
+
 const DEFAULT_REPOSITORY = 'Dragonshorn-Studios/shiori-brain';
 
 export const SKILL_DESTINATIONS = {
@@ -724,7 +726,9 @@ ${renderNativeSetupTable(repository)}
 
 ## MCP servers
 
-The doctor can add a local stdio MCP client for the published Pages archive, plus Storytold Craft CLIs that are already on \`PATH\`. Default doctor mode is still read-only and does not launch Claude or Codex. MCP writes happen only under \`--install\` / \`--update\`: Cursor via \`~/.cursor/mcp.json\`, Devin via \`~/.config/devin/mcp_config.json\`, OpenCode via \`~/.config/opencode/opencode.jsonc\` (\`mcp.servers\`; an existing \`opencode.json\` is updated in place instead. Fresh installs choose \`.jsonc\` so other tools' flat-schema OpenCode imports do not misread the file), Claude Code via \`claude mcp add -s user\`, and Codex via \`codex mcp add\`. The shiori-brain server is \`node <checkout>/packages/shiori-brain-mcp/src/index.js\` from the managed checkout; it is not loaded from a package registry. Installed entries set \`SHIORI_BRAIN_BASE_URL\` to this project's Pages origin (\`${archiveUrl || 'https://<owner>.github.io/<repo>/'}\`). Override with \`SHIORI_BRAIN_BASE_URL\` if Pages uses a custom domain. The installer fails instead of using another project's archive when that URL cannot be determined. Existing non-Shiori MCP entries are never overwritten.
+The doctor can add a local stdio MCP client for the published Pages archive, plus Storytold Craft CLIs found on \`PATH\` or in a bounded Windows install search (\`Program Files\\*Craft*\`, \`Program Files (x86)\\*Craft*\`, \`%LOCALAPPDATA%\\Programs\\*Craft*\`, and the WSL \`/mnt/c\` equivalents). Default doctor mode is still read-only and does not launch Claude or Codex. MCP writes happen only under \`--install\` / \`--update\`: Cursor via \`~/.cursor/mcp.json\`, Devin via \`~/.config/devin/mcp_config.json\`, OpenCode via \`~/.config/opencode/opencode.jsonc\` (\`mcp.servers\`; an existing \`opencode.json\` is updated in place instead. Fresh installs choose \`.jsonc\` so other tools' flat-schema OpenCode imports do not misread the file), Claude Code via \`claude mcp add -s user\`, and Codex via \`codex mcp add\`. The shiori-brain server is \`node <checkout>/packages/shiori-brain-mcp/src/index.js\` from the managed checkout; it is not loaded from a package registry. Installed entries set \`SHIORI_BRAIN_BASE_URL\` to this project's Pages origin (\`${archiveUrl || 'https://<owner>.github.io/<repo>/'}\`). Override with \`SHIORI_BRAIN_BASE_URL\` if Pages uses a custom domain. The installer fails instead of using another project's archive when that URL cannot be determined. Existing non-Shiori MCP entries are never overwritten.
+
+On Windows and in WSL, detected Craft CLIs are configured as \`<name>-cli mcp --attach 7979\` so a host can drive the running desktop app (start it with \`figcraft --control 7979\`). In WSL the doctor prefers the Windows \`.exe\` via WSL interop, because the control channel binds \`127.0.0.1\` on the Windows host and a Linux-side localhost may not reach it. Elsewhere the doctor keeps headless \`<name>-cli mcp\`.
 
 ${renderMcpMarkdownTable()}
 Consult shiori-brain on demand (\`search\` / \`read_doc\`) before architecture or security decisions; do not dump that knowledge into context. Skills are procedures only.
@@ -1083,6 +1087,7 @@ print_usage() {
     '  --verbose          print the status table, recipes, git, and MCP lines.' \\
     '  --help             print this usage text.' \\
     '  Host names may be space- or comma-separated; SHIORI_INSTALL / SHIORI_UPDATE / SHIORI_VERBOSE are the pipe equivalents.' \\
+    '  MCP: ${CRAFT_MCP_HELP}' \\
     '  Pipe (every detected host first; a bare curl | sh stays read-only):' \\
     '    ${lines.installAllSh}' \\
     '    ${lines.installAllPs1.replaceAll("'", "'\\''")}' \\
@@ -1098,7 +1103,7 @@ ${shellRecipes(repository).split('\n').map(line => `    '${line}'`).join(' \\\n'
 print_banner() {
   printf 'Shiori agent doctor\\nRepository: %s\\nMode: %s (%s)\\n\\n' \"$repository\" \"$context\" \"$project_hint\"
 ${shellStatusRows()}
-  printf '%s\\n' '' 'MCP servers' '  Installed under --install / --update for cursor, devin, opencode, claude, and codex. A read-only run does not launch host CLIs.'
+  printf '%s\\n' '' 'MCP servers' '  Installed under --install / --update for cursor, devin, opencode, claude, and codex. ${CRAFT_MCP_HELP} A read-only run does not launch host CLIs.'
   print_usage
 }
 operation=''
@@ -1730,6 +1735,7 @@ How -Install and -Update work
   -Verbose          print the status table, recipes, git, and MCP lines.
   -Help             print this usage text.
   Host names may be comma- or space-separated; SHIORI_INSTALL / SHIORI_UPDATE / SHIORI_VERBOSE are the pipe equivalents.
+  MCP: ${CRAFT_MCP_HELP}
   Pipe (every detected host first; a bare irm | iex stays read-only):
     ${lines.installAllSh}
     ${psHereStringLiteral(lines.installAllPs1)}
@@ -1789,7 +1795,7 @@ if ($script:Verbose) {
 ${psStatusRows()}
     Write-Host ''
     Write-Host 'MCP servers'
-    Write-Host '  Installed under -Install / -Update for cursor, devin, opencode, claude, and codex. A read-only run does not launch host CLIs.'
+    Write-Host '  Installed under -Install / -Update for cursor, devin, opencode, claude, and codex. ${CRAFT_MCP_HELP} A read-only run does not launch host CLIs.'
     Write-DoctorUsage
 }
 

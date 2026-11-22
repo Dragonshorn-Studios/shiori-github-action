@@ -318,6 +318,8 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.ok(setupGuide.indexOf('SHIORI_INSTALL=all sh') < setupGuide.indexOf("SHIORI_INSTALL='codex,claude,cursor'"));
   assert.match(setupGuide, /--update/);
   assert.match(setupGuide, /figcraft-cli mcp/);
+  assert.match(setupGuide, /--attach 7979/);
+  assert.match(setupGuide, /Program Files/);
   assert.match(setupGuide, /claude mcp add -s user/);
   assert.match(setupGuide, /Consult shiori-brain on demand/);
   assert.doesNotMatch(setupGuide, /npx -y shiori-brain-mcp/);
@@ -349,6 +351,8 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(shellDoctor, /--base-url/);
   assert.match(shellDoctor, /https:\/\/example\.github\.io\/project\//);
   assert.match(shellDoctor, /A read-only run does not launch host CLIs/);
+  assert.match(shellDoctor, /--attach 7979/);
+  assert.match(shellDoctor, /Program Files/);
   assert.match(shellDoctor, /--checkout \"\$checkout\"/);
   assert.match(shellDoctor, /packages\/shiori-brain-mcp\/src\/index.js/);
   assert.match(shellDoctor, /mktemp -d/);
@@ -381,6 +385,8 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.doesNotMatch(powerShellDoctor, /Invoke-McpCli -McpArgs @\('verify'\)/);
   assert.match(powerShellDoctor, /--base-url \$ArchiveUrl/);
   assert.match(powerShellDoctor, /A read-only run does not launch host CLIs/);
+  assert.match(powerShellDoctor, /--attach 7979/);
+  assert.match(powerShellDoctor, /Program Files/);
   assert.match(powerShellDoctor, /--checkout \$ManagedCheckout/);
   assert.match(powerShellDoctor, /packages\/shiori-brain-mcp\/src\/index.js/);
   const helper = await readFile(join(repositoryRoot, 'scripts/shiori-mcp.mjs'), 'utf8');

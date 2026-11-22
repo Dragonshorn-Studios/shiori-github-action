@@ -19,6 +19,7 @@ import {
 import {
   ARCHIVE_ENV,
   CRAFT_APPS,
+  CRAFT_CONTROL_PORT,
   applyInstructionFile,
   applyJsonMcpConfig,
   classifyEntry,
@@ -29,6 +30,7 @@ import {
   parseCliMcpEntry,
   renderMcpDataYaml,
   renderMcpMarkdownTable,
+  resolveCommand,
   runMcpCli,
   selectServersForInstall,
   shioriBrainScript
@@ -55,13 +57,29 @@ async function writeExecutable(path, body) {
   await writeFile(path, body, { mode: 0o755 });
 }
 
+function craftCliBody(commandName) {
+  return isWindows
+    ? `@echo off\r\nif "%~1"=="--version" (echo ${commandName} 0.0.0 & exit /b 0)\r\necho ok\r\nexit /b 0\r\n`
+    : `#!/bin/sh\n[ "$1" = --version ] && echo ${commandName} 0.0.0 && exit 0\necho ok\nexit 0\n`;
+}
+
 async function writeCraftCli(binDir) {
-  await writeExecutable(
-    join(binDir, isWindows ? 'figcraft-cli.cmd' : 'figcraft-cli'),
-    isWindows
-      ? '@echo off\r\nif "%~1"=="--version" (echo figcraft-cli 0.0.0 & exit /b 0)\r\necho ok\r\nexit /b 0\r\n'
-      : '#!/bin/sh\n[ "$1" = --version ] && echo figcraft-cli 0.0.0 && exit 0\necho ok\nexit 0\n'
-  );
+  await writeExecutable(join(binDir, isWindows ? 'figcraft-cli.cmd' : 'figcraft-cli'), craftCliBody('figcraft-cli'));
+}
+
+async function writeNamedCraftCli(dir, commandName, fileName = commandName) {
+  const path = join(dir, fileName);
+  await writeExecutable(path, craftCliBody(commandName));
+  return path;
+}
+
+function craftSearchEnv(extra = {}) {
+  return withArchive({
+    ...process.env,
+    PATH: '/missing-bin',
+    SHIORI_CRAFT_WSL: '0',
+    ...extra
+  });
 }
 
 function fakeCraftPath(binDir) {
@@ -211,6 +229,8 @@ test('craft catalog lists the known Storytold CLIs once', () => {
   assert.equal(catalog[0].whenInstalled, false);
   assert.equal(new Set(catalog.map(item => item.name)).size, catalog.length);
   assert.match(renderMcpMarkdownTable(), /figcraft-cli mcp/);
+  assert.match(renderMcpMarkdownTable(), /--attach 7979/);
+  assert.match(renderMcpMarkdownTable(), /Program Files/);
   assert.match(renderMcpMarkdownTable(), /node ~\/.local\/share\/shiori\/shiori-brain\/packages\/shiori-brain-mcp\/src\/index.js/);
   assert.match(renderMcpDataYaml(), /when_installed: true/);
   assert.doesNotMatch(renderMcpMarkdownTable(), /npx|token|secret|password/i);
@@ -305,7 +325,10 @@ test('classifyEntry distinguishes missing, match, stale, and conflict', async ()
   assert.equal(classifyEntry(shiori, shiori), 'match');
   assert.equal(classifyEntry({ command: 'node', args: ['/old/packages/shiori-brain-mcp/src/index.js'] }, shiori), 'stale');
   assert.equal(classifyEntry({ command: 'python', args: ['mcp'] }, shiori), 'conflict');
-  assert.equal(classifyEntry({ command: 'figcraft-cli', args: ['mcp', '--attach', '7979'] }, figcraft), 'conflict');
+  assert.equal(classifyEntry({ command: 'figcraft-cli', args: ['mcp', '--attach', '7979'] }, figcraft), 'stale');
+  const figcraftAttach = { ...figcraft, args: ['mcp', '--attach', CRAFT_CONTROL_PORT] };
+  assert.equal(classifyEntry({ command: 'figcraft-cli', args: ['mcp', '--attach', '7979'] }, figcraftAttach), 'match');
+  assert.equal(classifyEntry({ command: 'figcraft-cli', args: ['mcp'] }, figcraftAttach), 'stale');
   assert.equal(classifyEntry({ command: '/opt/figcraft-cli', args: ['mcp'] }, figcraft), 'match');
   assert.equal(classifyEntry({ url: 'https://figcraft.example/mcp' }, figcraft), 'conflict');
   assert.equal(classifyEntry({ url: 'https://figcraft.example/mcp', headers: { Authorization: 'example' } }, figcraft), 'conflict');
@@ -321,6 +344,114 @@ test('selectServersForInstall skips Craft CLIs that are not on PATH', async () =
   assert.ok(selected.some(item => item.name === 'figcraft'));
   assert.ok(skipped.some(item => item.name === 'cadcraft'));
   assert.ok(!selected.some(item => item.name === 'cadcraft'));
+});
+
+test('Program Files Craft CLIs are found off PATH, and PATH-only lookup still skips them', async () => {
+  const programFiles = await mkdtemp(join(tmpdir(), 'shiori-pf-'));
+  const figcraftPath = await writeNamedCraftCli(join(programFiles, 'FigCraft'), 'figcraft-cli', 'figcraft-cli.exe');
+  const cadcraftPath = await writeNamedCraftCli(join(programFiles, 'CadCraft'), 'cadcraft-cli', 'cadcraft-cli.exe');
+  const env = craftSearchEnv({ SHIORI_CRAFT_PROGRAM_FILES: programFiles });
+  assert.equal(resolveCommand('figcraft-cli', env, { pathOnly: true }), null);
+  assert.equal(resolveCommand('cadcraft-cli', env, { pathOnly: true }), null);
+  const pathOnly = selectServersForInstall(mcpServerCatalog(), craftSearchEnv());
+  assert.ok(pathOnly.skipped.some(item => item.name === 'figcraft'));
+  assert.ok(pathOnly.skipped.some(item => item.name === 'cadcraft'));
+  assert.ok(!pathOnly.selected.some(item => item.name === 'figcraft'));
+
+  const { selected, skipped } = selectServersForInstall(mcpServerCatalog(), env);
+  const figcraft = selected.find(item => item.name === 'figcraft');
+  const cadcraft = selected.find(item => item.name === 'cadcraft');
+  assert.equal(figcraft.command, figcraftPath);
+  assert.deepEqual(figcraft.args, ['mcp', '--attach', CRAFT_CONTROL_PORT]);
+  assert.equal(cadcraft.command, cadcraftPath);
+  assert.deepEqual(cadcraft.args, ['mcp', '--attach', CRAFT_CONTROL_PORT]);
+  assert.ok(skipped.some(item => item.name === 'deckcraft'));
+});
+
+test('LocalAppData and Program Files (x86) Craft CLIs are found through env overrides', async () => {
+  const x86 = await mkdtemp(join(tmpdir(), 'shiori-pfx86-'));
+  const localAppData = await mkdtemp(join(tmpdir(), 'shiori-localapp-'));
+  const photocraftPath = await writeNamedCraftCli(join(x86, 'PhotoCraft'), 'photocraft-cli', 'photocraft-cli.exe');
+  const wordcraftPath = await writeNamedCraftCli(join(localAppData, 'Programs', 'WordCraft'), 'wordcraft-cli', 'wordcraft-cli.cmd');
+  const env = craftSearchEnv({
+    SHIORI_CRAFT_PROGRAM_FILES_X86: x86,
+    SHIORI_CRAFT_LOCALAPPDATA: localAppData
+  });
+  const { selected } = selectServersForInstall(mcpServerCatalog(), env);
+  assert.equal(selected.find(item => item.name === 'photocraft').command, photocraftPath);
+  assert.equal(selected.find(item => item.name === 'wordcraft').command, wordcraftPath);
+});
+
+test('WSL /mnt/c fixture finds the Windows Craft install and prefers it over PATH', async () => {
+  const mntc = await mkdtemp(join(tmpdir(), 'shiori-mntc-'));
+  const linuxBin = await mkdtemp(join(tmpdir(), 'shiori-linux-bin-'));
+  await writeNamedCraftCli(linuxBin, 'figcraft-cli');
+  const figcraftPath = await writeNamedCraftCli(join(mntc, 'Program Files', 'FigCraft'), 'figcraft-cli', 'figcraft-cli.exe');
+  const cadcraftPath = await writeNamedCraftCli(
+    join(mntc, 'Users', 'tester', 'AppData', 'Local', 'Programs', 'CadCraft'),
+    'cadcraft-cli',
+    'cadcraft-cli.exe'
+  );
+  const env = craftSearchEnv({
+    PATH: `${linuxBin}${delimiter}/missing-bin`,
+    SHIORI_CRAFT_WSL: '1',
+    SHIORI_CRAFT_WSL_WINDOWS_ROOT: mntc,
+    USER: 'tester'
+  });
+  assert.equal(resolveCommand('figcraft-cli', env, { pathOnly: true }), join(linuxBin, 'figcraft-cli'));
+  assert.equal(resolveCommand('figcraft-cli', env), figcraftPath);
+  const { selected } = selectServersForInstall(mcpServerCatalog(), env);
+  const figcraft = selected.find(item => item.name === 'figcraft');
+  const cadcraft = selected.find(item => item.name === 'cadcraft');
+  assert.equal(figcraft.command, figcraftPath);
+  assert.deepEqual(figcraft.args, ['mcp', '--attach', CRAFT_CONTROL_PORT]);
+  assert.equal(cadcraft.command, cadcraftPath);
+  assert.deepEqual(cadcraft.args, ['mcp', '--attach', CRAFT_CONTROL_PORT]);
+});
+
+test('Windows-style --install writes attach config for Program Files Craft CLIs', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const programFiles = await mkdtemp(join(tmpdir(), 'shiori-pf-'));
+  const figcraftPath = await writeNamedCraftCli(join(programFiles, 'FigCraft'), 'figcraft-cli', 'figcraft-cli.exe');
+  await writeNamedCraftCli(join(programFiles, 'CadCraft'), 'cadcraft-cli', 'cadcraft-cli.exe');
+  await mkdir(join(home, '.cursor'), { recursive: true });
+  const { reports, lines } = runMcpCli(['install', '--home', home, '--host', 'cursor'], {
+    env: craftSearchEnv({ SHIORI_CRAFT_PROGRAM_FILES: programFiles })
+  });
+  const config = JSON.parse(await readFile(join(home, '.cursor/mcp.json'), 'utf8'));
+  assert.deepEqual(config.mcpServers.figcraft, { command: figcraftPath, args: ['mcp', '--attach', CRAFT_CONTROL_PORT] });
+  assert.deepEqual(config.mcpServers.cadcraft.args, ['mcp', '--attach', CRAFT_CONTROL_PORT]);
+  assert.ok(reports.some(item => item.name === 'figcraft' && item.status === 'added'));
+  assert.ok(reports.some(item => item.name === 'cadcraft' && item.status === 'added'));
+  assert.ok(lines.some(line => /MCP cursor figcraft added/.test(line)));
+});
+
+test('WSL-style --install writes attach config using the Windows .exe', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const mntc = await mkdtemp(join(tmpdir(), 'shiori-mntc-'));
+  const figcraftPath = await writeNamedCraftCli(join(mntc, 'Program Files', 'FigCraft'), 'figcraft-cli', 'figcraft-cli.exe');
+  await mkdir(join(home, '.cursor'), { recursive: true });
+  const { reports } = runMcpCli(['install', '--home', home, '--host', 'cursor'], {
+    env: craftSearchEnv({
+      SHIORI_CRAFT_WSL: '1',
+      SHIORI_CRAFT_WSL_WINDOWS_ROOT: mntc
+    })
+  });
+  const config = JSON.parse(await readFile(join(home, '.cursor/mcp.json'), 'utf8'));
+  assert.deepEqual(config.mcpServers.figcraft, { command: figcraftPath, args: ['mcp', '--attach', CRAFT_CONTROL_PORT] });
+  assert.ok(reports.some(item => item.name === 'figcraft' && item.status === 'added'));
+});
+
+test('bare doctor stays read-only when a Program Files Craft CLI is present', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  await mkdir(join(home, '.cursor'), { recursive: true });
+  const programFiles = await mkdtemp(join(tmpdir(), 'shiori-pf-'));
+  await writeNamedCraftCli(join(programFiles, 'FigCraft'), 'figcraft-cli', 'figcraft-cli.exe');
+  const { reports } = runMcpCli(['verify', '--home', home, '--host', 'cursor'], {
+    env: craftSearchEnv({ SHIORI_CRAFT_PROGRAM_FILES: programFiles })
+  });
+  assert.equal(existsSync(join(home, '.cursor/mcp.json')), false);
+  assert.ok(reports.some(item => item.name === 'figcraft' && item.status === 'missing'));
 });
 
 test('runMcpCli install writes cursor JSON atomically with a backup and does not write Cursor rules', async () => {
@@ -814,6 +945,8 @@ forEachDoctorKind('generated doctor --install cursor writes MCP config using the
   assert.equal(existsSync(join(home, '.cursor/rules')), false);
   const setup = await readFile(join(repositoryRoot, 'AGENT-SETUP.md'), 'utf8');
   assert.match(setup, /figcraft-cli mcp/);
+  assert.match(setup, /--attach 7979/);
+  assert.match(setup, /Program Files/);
   assert.match(setup, /Consult shiori-brain on demand/);
   assert.doesNotMatch(setup, /npx -y shiori-brain-mcp/);
 });
@@ -835,4 +968,62 @@ forEachDoctorKind('generated doctor --install devin writes MCP config using the 
   assert.equal(config.mcpServers['shiori-brain'].env[ARCHIVE_ENV], DOCTOR_ARCHIVE_URL);
   const recorded = await readFile(join(home, '.local/state/shiori/installed-hosts'), 'utf8');
   assert.match(recorded, /^devin$/m);
+});
+
+forEachDoctorKind('generated doctor --install cursor writes attach MCP for a Program Files Craft CLI', async (_t, kind) => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-doctor-'));
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
+  const programFiles = await mkdtemp(join(tmpdir(), 'shiori-pf-'));
+  const upstream = await makeUpstreamRepo({ repository: 'example/project', marketplace: 'project-knowledge' });
+  const gitVars = await writeFakeGit(binDir, upstream);
+  await writeDoctorTree(repositoryRoot, { repository: 'example/project', marketplace: 'project-knowledge' });
+  const figcraftPath = await writeNamedCraftCli(join(programFiles, 'FigCraft'), 'figcraft-cli', 'figcraft-cli.exe');
+  await writeNamedCraftCli(join(programFiles, 'CadCraft'), 'cadcraft-cli', 'cadcraft-cli.exe');
+  await mkdir(join(home, '.cursor'), { recursive: true });
+  const env = baseDoctorEnv(home, {
+    binDir,
+    gitEnv: gitVars,
+    extra: {
+      SHIORI_CRAFT_WSL: '0',
+      SHIORI_CRAFT_PROGRAM_FILES: programFiles
+    }
+  });
+  const before = existsSync(join(home, '.cursor/mcp.json'));
+  const bare = runDoctor(repositoryRoot, {}, { home, env, kind });
+  assert.equal(bare.status, 0, bare.stderr + bare.stdout);
+  assert.equal(existsSync(join(home, '.cursor/mcp.json')), before);
+
+  const result = runDoctor(repositoryRoot, { install: ['cursor'], verbose: true }, { home, env, kind });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const config = JSON.parse(await readFile(join(home, '.cursor/mcp.json'), 'utf8'));
+  assert.deepEqual(config.mcpServers.figcraft, { command: figcraftPath, args: ['mcp', '--attach', '7979'] });
+  assert.deepEqual(config.mcpServers.cadcraft.args, ['mcp', '--attach', '7979']);
+  assert.match(result.stdout, /MCP cursor figcraft added/);
+  assert.match(result.stdout, /MCP cursor cadcraft added/);
+});
+
+forEachDoctorKind('generated doctor --install cursor writes attach MCP for a WSL /mnt/c Craft CLI', async (_t, kind) => {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'shiori-doctor-'));
+  const home = await mkdtemp(join(tmpdir(), 'shiori-home-'));
+  const binDir = await mkdtemp(join(tmpdir(), 'shiori-bin-'));
+  const mntc = await mkdtemp(join(tmpdir(), 'shiori-mntc-'));
+  const upstream = await makeUpstreamRepo({ repository: 'example/project', marketplace: 'project-knowledge' });
+  const gitVars = await writeFakeGit(binDir, upstream);
+  await writeDoctorTree(repositoryRoot, { repository: 'example/project', marketplace: 'project-knowledge' });
+  const figcraftPath = await writeNamedCraftCli(join(mntc, 'Program Files', 'FigCraft'), 'figcraft-cli', 'figcraft-cli.exe');
+  await mkdir(join(home, '.cursor'), { recursive: true });
+  const env = baseDoctorEnv(home, {
+    binDir,
+    gitEnv: gitVars,
+    extra: {
+      SHIORI_CRAFT_WSL: '1',
+      SHIORI_CRAFT_WSL_WINDOWS_ROOT: mntc
+    }
+  });
+  const result = runDoctor(repositoryRoot, { install: ['cursor'], verbose: true }, { home, env, kind });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const config = JSON.parse(await readFile(join(home, '.cursor/mcp.json'), 'utf8'));
+  assert.deepEqual(config.mcpServers.figcraft, { command: figcraftPath, args: ['mcp', '--attach', '7979'] });
+  assert.match(result.stdout, /MCP cursor figcraft added/);
 });
