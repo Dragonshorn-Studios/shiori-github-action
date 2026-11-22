@@ -1583,20 +1583,23 @@ function Remove-LeftoverSkillTemps {
     param([string]$DestRoot)
     if (-not (Test-Path -LiteralPath $DestRoot)) { return }
     Get-ChildItem -LiteralPath $DestRoot -Force | Where-Object { $_.Name -like ($SkillLinkTempPrefix + '*') } | ForEach-Object {
+        $LeftoverPath = $_.FullName
+        $LeftoverIsContainer = [bool]$_.PSIsContainer
+        $LeftoverIsReparse = [bool]($_.Attributes -band [IO.FileAttributes]::ReparsePoint)
         try {
-            if ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-                if ($_.PSIsContainer) {
-                    [IO.Directory]::Delete($_.FullName)
+            if ($LeftoverIsReparse) {
+                if ($LeftoverIsContainer) {
+                    [IO.Directory]::Delete($LeftoverPath)
                 } else {
-                    [IO.File]::Delete($_.FullName)
+                    [IO.File]::Delete($LeftoverPath)
                 }
-            } elseif ($_.PSIsContainer) {
-                [Console]::Error.WriteLine(\"Warning: skipping leftover skill temp $($_.FullName); it is a directory, not a link.\")
+            } elseif ($LeftoverIsContainer) {
+                [Console]::Error.WriteLine(\"Warning: skipping leftover skill temp $LeftoverPath; it is a directory, not a link.\")
             } else {
-                [IO.File]::Delete($_.FullName)
+                [IO.File]::Delete($LeftoverPath)
             }
         } catch {
-            [Console]::Error.WriteLine(\"Warning: could not remove leftover skill temp $($_.FullName); continuing.\")
+            [Console]::Error.WriteLine(\"Warning: could not remove leftover skill temp $LeftoverPath; continuing.\")
         }
     }
 }

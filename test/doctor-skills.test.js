@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, lstatSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -80,6 +80,10 @@ test('one host map generates sh, ps1, and the guide host table', () => {
   assert.match(ps1, /\[IO\.File\]::Delete/);
   assert.match(ps1, /FileAttributes\]::ReparsePoint/);
   assert.equal([...ps1.matchAll(/\[IO\.Directory\]::Delete/g)].length, 2);
+  assert.match(ps1, /\$LeftoverPath = \$_\.FullName/);
+  assert.match(ps1, /could not remove leftover skill temp \$LeftoverPath/);
+  assert.doesNotMatch(ps1, /could not remove leftover skill temp \$\(\$_\.FullName\)/);
+  assert.match(ps1, /could not remove obsolete skill link \$OldTarget/);
   assert.doesNotMatch(ps1, /Remove-Item/);
   assert.equal(SKILL_DESTINATIONS.agents.homePath, '.agents/skills');
   assert.equal(SKILL_DESTINATIONS.claude.homePath, '.claude/skills');
@@ -307,6 +311,51 @@ test('ps1 leftover real directory under the temp prefix is not deleted', {
   assert.equal(isDirectoryNotLink(leftoverDir), true);
   assert.equal(await readFile(join(leftoverDir, 'sentinel'), 'utf8'), 'keep-dir');
   assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
+});
+
+test('ps1 leftover skill temp that cannot be removed warns and install continues', {
+  skip: PWSH ? false : 'pwsh must be on PATH so ubuntu-latest can run generated shiori-doctor.ps1'
+}, async () => {
+  const { workDir, home, env } = await setupDoctor();
+  const first = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind: 'ps1' });
+  assert.equal(first.status, 0, first.stderr + first.stdout);
+  const destRoot = join(home, '.agents/skills');
+  const { leftover } = await plantLeftoverSkillFile(destRoot);
+  await chmod(destRoot, 0o555);
+  try {
+    const second = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind: 'ps1' });
+    assert.equal(second.status, 0, second.stderr + second.stdout);
+    assert.match(second.stderr, /could not remove leftover skill temp/);
+    assert.equal(second.stderr.includes(leftover), true, second.stderr);
+    assert.equal(existsSync(leftover), true);
+    assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
+  } finally {
+    await chmod(destRoot, 0o755);
+  }
+});
+
+test('ps1 obsolete skill link that cannot be removed warns and install continues', {
+  skip: PWSH ? false : 'pwsh must be on PATH so ubuntu-latest can run generated shiori-doctor.ps1'
+}, async () => {
+  const { workDir, home, env } = await setupDoctor();
+  const first = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind: 'ps1' });
+  assert.equal(first.status, 0, first.stderr + first.stdout);
+  const destRoot = join(home, '.agents/skills');
+  const staleLink = await plantDanglingSkillLink(destRoot, checkoutSkills(home, 'stale'));
+  const managedPath = join(home, '.local/state/shiori/managed-skills');
+  const managed = await readFile(managedPath, 'utf8');
+  await writeFile(managedPath, `${managed.trimEnd()}\nstale\n`);
+  await chmod(destRoot, 0o555);
+  try {
+    const second = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind: 'ps1' });
+    assert.equal(second.status, 0, second.stderr + second.stdout);
+    assert.match(second.stderr, /could not remove obsolete skill link/);
+    assert.equal(second.stderr.includes(staleLink), true, second.stderr);
+    assert.equal(lstatSync(staleLink).isSymbolicLink(), true);
+    assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
+  } finally {
+    await chmod(destRoot, 0o755);
+  }
 });
 
 forEachDoctorKind('leftover temp skill file is removed and install still succeeds', async (_t, kind) => {
