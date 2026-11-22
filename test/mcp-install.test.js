@@ -118,6 +118,10 @@ function pathHas(haystack, needle) {
     .includes(String(needle || '').replaceAll('\\', '/').toLowerCase());
 }
 
+function isUserLocalAppDataPrograms(root) {
+  return /\/Users\/[^/]+\/AppData\/Local\/Programs$/i.test(String(root || '').replaceAll('\\', '/'));
+}
+
 function listMcpHelperTemps(dir) {
   try {
     return readdirSync(dir).filter(name => /^shiori-mcp-[0-9a-f-]+\.mjs$/i.test(name));
@@ -452,7 +456,7 @@ test('WSL does not scan Windows user profiles unless SHIORI_CRAFT_LOCALAPPDATA i
   });
   delete unsetEnv.SHIORI_CRAFT_LOCALAPPDATA;
   const unsetRoots = craftInstallRoots(unsetEnv);
-  assert.equal(unsetRoots.some(root => pathHas(root, 'AppData')), false);
+  assert.equal(unsetRoots.some(isUserLocalAppDataPrograms), false);
   assert.equal(resolveCommand('cadcraft-cli', unsetEnv), null);
   assert.equal(resolveCommand('wordcraft-cli', unsetEnv), null);
 
@@ -465,7 +469,8 @@ test('WSL does not scan Windows user profiles unless SHIORI_CRAFT_LOCALAPPDATA i
     SHIORI_CRAFT_LOCALAPPDATA: testerLocal
   });
   const setRoots = craftInstallRoots(setEnv);
-  assert.equal(setRoots.filter(root => pathHas(root, 'AppData')).length, 1);
+  assert.equal(setRoots.filter(isUserLocalAppDataPrograms).length, 1);
+  assert.equal(setRoots.some(root => pathHas(root, join('Users', 'other', 'AppData'))), false);
   assertSamePath(resolveCommand('cadcraft-cli', setEnv), cadcraftPath);
   assert.equal(resolveCommand('wordcraft-cli', setEnv), null);
   assert.ok(wordcraftPath);
