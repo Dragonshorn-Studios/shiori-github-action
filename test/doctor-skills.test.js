@@ -24,6 +24,8 @@ import {
   git,
   isWindows,
   makeUpstreamRepo,
+  plantLeftoverSkillJunction,
+  plantLeftoverSkillLink,
   plantOutwardJunction,
   plantOutwardSymlink,
   runDoctor,
@@ -62,6 +64,9 @@ test('one host map generates sh, ps1, and the guide host table', () => {
   const guide = files.get('AGENT-SETUP.md');
   assert.match(sh, /sync_skills_dest/);
   assert.match(ps1, /Sync-SkillsDest/);
+  assert.match(ps1, /\[IO\.Directory\]::Delete/);
+  assert.match(ps1, /FileAttributes\]::ReparsePoint/);
+  assert.doesNotMatch(ps1, /Remove-Item/);
   assert.equal(SKILL_DESTINATIONS.agents.homePath, '.agents/skills');
   assert.equal(SKILL_DESTINATIONS.claude.homePath, '.claude/skills');
   for (const host of installableDoctorHosts()) {
@@ -236,14 +241,57 @@ forEachDoctorKind('update/dedupe removes only marked entries', async (_t, kind) 
 
 forEachDoctorKind('leftover temp skill link is cleaned up and replaced with a complete link', async (_t, kind) => {
   const { workDir, home, env } = await setupDoctor();
-  await mkdir(join(home, '.agents/skills'), { recursive: true });
-  const leftover = join(home, '.agents/skills', '.shiori-link-leftover');
-  await writeFile(leftover, 'interrupted');
+  const destRoot = join(home, '.agents/skills');
+  const { leftover, leftoverTarget } = await plantLeftoverSkillLink(destRoot);
   const result = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind });
   assert.equal(result.status, 0, result.stderr + result.stdout);
   assert.equal(existsSync(leftover), false);
+  assert.equal(await readFile(join(leftoverTarget, 'sentinel'), 'utf8'), 'keep');
+  assert.equal(existsSync(leftoverTarget), true);
   assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
   assertOurLink(agentsSkill(home, 'beta'), checkoutSkills(home, 'beta'));
+});
+
+test('ps1 leftover skill symlink is removed without touching its target (ubuntu stand-in)', {
+  skip: PWSH ? false : 'pwsh must be on PATH so ubuntu-latest can run generated shiori-doctor.ps1'
+}, async () => {
+  const { workDir, home, env } = await setupDoctor();
+  const destRoot = join(home, '.agents/skills');
+  const { leftover, leftoverTarget } = await plantLeftoverSkillLink(destRoot);
+  const result = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind: 'ps1' });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.equal(existsSync(leftover), false);
+  assert.equal(lstatSync(leftoverTarget).isDirectory(), true);
+  assert.equal(await readFile(join(leftoverTarget, 'sentinel'), 'utf8'), 'keep');
+  assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
+});
+
+test('ps1 leftover skill junction is removed without touching its target', {
+  skip: isWindows ? false : SKIP_NO_WINDOWS_RUNNER
+}, async () => {
+  const { workDir, home, env } = await setupDoctor();
+  const destRoot = join(home, '.agents/skills');
+  const { leftover, leftoverTarget } = await plantLeftoverSkillJunction(destRoot);
+  const result = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind: 'ps1' });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.equal(existsSync(leftover), false);
+  assert.equal(lstatSync(leftoverTarget).isDirectory(), true);
+  assert.equal(await readFile(join(leftoverTarget, 'sentinel'), 'utf8'), 'keep');
+  assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
+});
+
+test('ps1 leftover real directory under the temp prefix is not deleted', {
+  skip: PWSH ? false : 'pwsh must be on PATH so ubuntu-latest can run generated shiori-doctor.ps1'
+}, async () => {
+  const { workDir, home, env } = await setupDoctor();
+  const leftoverDir = join(home, '.agents/skills', '.shiori-link-keepdir');
+  await mkdir(leftoverDir, { recursive: true });
+  await writeFile(join(leftoverDir, 'sentinel'), 'keep-dir');
+  const result = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind: 'ps1' });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.equal(isDirectoryNotLink(leftoverDir), true);
+  assert.equal(await readFile(join(leftoverDir, 'sentinel'), 'utf8'), 'keep-dir');
+  assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
 });
 
 forEachDoctorKind('outward-pointing skills directory is refused', async (_t, kind) => {

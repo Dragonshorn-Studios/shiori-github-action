@@ -186,7 +186,27 @@ Shiori also generates `AGENT-SETUP.md` and read-only `scripts/shiori-doctor.sh` 
 
 Default `--install` / `--update` output is short (checkout, detected hosts, destinations, summary); `--verbose` or `SHIORI_VERBOSE=1` restores the status table, recipes, git, and MCP lines. Default doctor mode never writes home-directory configuration. Under explicit `--install` / `--update`, hosts that already read `~/.agents/skills` (OpenCode, MCode, Vibe, Codex, local Cursor, local Devin) receive skill links only in that directory from one managed checkout. Claude Code is linked into `~/.claude/skills` instead. The doctor does not install Codex or Claude plugins and does not copy skills into host-specific directories such as `~/.cursor/skills` or `~/.vibe/skills`. Cursor, Claude Code, Codex, OpenCode, and Devin also receive a local stdio MCP entry for [`shiori-brain-mcp`](packages/shiori-brain-mcp) (`node ~/.local/share/shiori/shiori-brain/packages/shiori-brain-mcp/src/index.js`) plus Storytold Craft CLIs that are already on `PATH` (`<name>-cli mcp`). The installed `shiori-brain` entry sets `SHIORI_BRAIN_BASE_URL` to this project's GitHub Pages origin (`https://<owner>.github.io/<repo>/`, or `https://<owner>.github.io/` for a `owner.github.io` user site). Override that with the `SHIORI_BRAIN_BASE_URL` environment variable when Pages uses a custom domain. The installer and the MCP server fail instead of reading another project's archive when the origin cannot be determined. Cursor is written through `~/.cursor/mcp.json`; Claude Code and Codex are registered through `claude mcp add -s user --env SHIORI_BRAIN_BASE_URL=...` and `codex mcp add --env SHIORI_BRAIN_BASE_URL=...`. Existing non-Shiori MCP entries are left untouched. Cursor Cloud gets no user-level skills from the doctor.
 
-The generated guide includes `curl | sh` and PowerShell `irm | iex` entry points, so the doctor can run without cloning the generated knowledge repository. Remote mode performs detection only and recommends repository-backed marketplace installation; it never assumes project adapters exist in the current directory.
+The generated guide includes `curl | sh` and PowerShell `irm | iex` entry points, so the doctor can run without cloning the generated knowledge repository. A bare `curl | sh` / `irm | iex` with no environment variable stays read-only (prints detected / not detected only). Remote mode performs detection only and recommends repository-backed marketplace installation; it never assumes project adapters exist in the current directory.
+
+To install every detected host from the one-liner, set `SHIORI_INSTALL='all'` first (`SHIORI_UPDATE='all'` for update):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/scripts/shiori-doctor.sh | SHIORI_INSTALL=all sh
+```
+
+```powershell
+$env:SHIORI_INSTALL='all'; irm https://raw.githubusercontent.com/OWNER/REPO/main/scripts/shiori-doctor.ps1 | iex
+```
+
+Named hosts:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/scripts/shiori-doctor.sh | SHIORI_INSTALL='codex,claude,cursor' sh
+```
+
+```powershell
+$env:SHIORI_INSTALL='codex,claude,cursor'; irm https://raw.githubusercontent.com/OWNER/REPO/main/scripts/shiori-doctor.ps1 | iex
+```
 
 `--install` / `--update` with no host names set up every locally detected installable host. An explicit host list still takes precedence. Successful hosts are recorded in `installed-hosts` so a later named update still works. Checkout updates require the expected origin, a clean tree, and a fast-forward; skill synchronization manages only links previously created by Shiori and skips foreign same-name entries with a warning.
 

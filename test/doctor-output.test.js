@@ -8,6 +8,7 @@ import {
   forEachDoctorKind,
   makeUpstreamRepo,
   runDoctor,
+  snapshotDoctorStdout,
   writeDoctorTree,
   writeFakeGit
 } from './doctor-fixtures.js';
@@ -21,14 +22,6 @@ async function setupDoctor(options = {}) {
   await writeDoctorTree(workDir, options);
   const env = baseDoctorEnv(home, { binDir, gitEnv: gitVars, extra: options.env });
   return { workDir, home, binDir, upstream, env };
-}
-
-function snapshotStdout(stdout) {
-  return String(stdout || '')
-    .replaceAll('\r\n', '\n')
-    .replace(/[0-9a-f]{40}/gi, '<sha>')
-    .replace(/[ \t]+$/gm, '')
-    .trim() + '\n';
 }
 
 const EXPECTED_INSTALL = `checkout: cloned <sha>
@@ -50,9 +43,9 @@ forEachDoctorKind('default install/update stdout snapshot', async (_t, kind) => 
   await mkdir(join(home, '.cursor'), { recursive: true });
   const installed = runDoctor(workDir, { install: [] }, { home, env, kind });
   assert.equal(installed.status, 0, installed.stderr + installed.stdout);
-  assert.equal(snapshotStdout(installed.stdout), EXPECTED_INSTALL);
+  assert.equal(snapshotDoctorStdout(installed.stdout), EXPECTED_INSTALL);
 
   const updated = runDoctor(workDir, { update: true }, { home, env, kind });
   assert.equal(updated.status, 0, updated.stderr + updated.stdout);
-  assert.equal(snapshotStdout(updated.stdout), EXPECTED_UPDATE);
+  assert.equal(snapshotDoctorStdout(updated.stdout), EXPECTED_UPDATE);
 });
