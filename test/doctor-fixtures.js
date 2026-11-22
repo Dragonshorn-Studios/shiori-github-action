@@ -270,6 +270,31 @@ export async function plantLeftoverSkillLink(destRoot, options = {}) {
   return { leftover, leftoverTarget };
 }
 
+export async function plantLeftoverSkillFile(destRoot, options = {}) {
+  await mkdir(destRoot, { recursive: true });
+  const leftover = join(destRoot, options.name || '.shiori-link-leftover-file');
+  await writeFile(leftover, options.contents || 'stale-temp');
+  return { leftover };
+}
+
+export async function plantLeftoverSkillFileLink(destRoot, options = {}) {
+  const leftoverTargetDir = options.targetDir || await mkdtemp(join(tmpdir(), 'shiori-file-target-'));
+  await mkdir(leftoverTargetDir, { recursive: true });
+  const leftoverTarget = options.target || join(leftoverTargetDir, 'sentinel');
+  await writeFile(leftoverTarget, 'keep-file');
+  await mkdir(destRoot, { recursive: true });
+  const leftover = join(destRoot, options.name || '.shiori-link-leftover-file');
+  await symlink(leftoverTarget, leftover);
+  return { leftover, leftoverTarget };
+}
+
+export async function plantDanglingSkillLink(destRoot, expectedTarget, name = 'stale') {
+  await mkdir(destRoot, { recursive: true });
+  const link = join(destRoot, name);
+  await symlink(expectedTarget, link, 'dir');
+  return link;
+}
+
 export async function plantLeftoverSkillJunction(destRoot, options = {}) {
   if (!isWindows) throw new Error('junctions require Windows');
   const leftoverTarget = options.target || await mkdtemp(join(tmpdir(), 'shiori-link-target-'));

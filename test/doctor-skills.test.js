@@ -24,6 +24,9 @@ import {
   git,
   isWindows,
   makeUpstreamRepo,
+  plantDanglingSkillLink,
+  plantLeftoverSkillFile,
+  plantLeftoverSkillFileLink,
   plantLeftoverSkillJunction,
   plantLeftoverSkillLink,
   plantOutwardJunction,
@@ -57,6 +60,15 @@ function isDirectoryNotLink(path) {
   return stat.isDirectory();
 }
 
+function assertPathGone(path, message) {
+  try {
+    lstatSync(path);
+    assert.fail(message || `expected missing path: ${path}`);
+  } catch (error) {
+    assert.equal(error.code, 'ENOENT', message || `expected missing path: ${path}`);
+  }
+}
+
 test('one host map generates sh, ps1, and the guide host table', () => {
   const files = installSupportFiles({ repository: REPOSITORY, marketplaceName: MARKETPLACE });
   const sh = files.get('scripts/shiori-doctor.sh');
@@ -65,7 +77,9 @@ test('one host map generates sh, ps1, and the guide host table', () => {
   assert.match(sh, /sync_skills_dest/);
   assert.match(ps1, /Sync-SkillsDest/);
   assert.match(ps1, /\[IO\.Directory\]::Delete/);
+  assert.match(ps1, /\[IO\.File\]::Delete/);
   assert.match(ps1, /FileAttributes\]::ReparsePoint/);
+  assert.equal([...ps1.matchAll(/\[IO\.Directory\]::Delete/g)].length, 2);
   assert.doesNotMatch(ps1, /Remove-Item/);
   assert.equal(SKILL_DESTINATIONS.agents.homePath, '.agents/skills');
   assert.equal(SKILL_DESTINATIONS.claude.homePath, '.claude/skills');
@@ -231,7 +245,7 @@ forEachDoctorKind('update/dedupe removes only marked entries', async (_t, kind) 
   const second = runDoctor(workDir, { update: ['mcode'] }, { home, env, kind });
   assert.equal(second.status, 0, second.stderr + second.stdout);
   assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
-  assert.equal(existsSync(agentsSkill(home, 'beta')), false);
+  assertPathGone(agentsSkill(home, 'beta'), 'dropped dest skill link should be gone');
   assert.equal(existsSync(join(home, '.agents/skills/foreign/SKILL.md')), true);
   const managed = await readFile(join(home, '.local/state/shiori/managed-skills'), 'utf8');
   assert.match(managed, /^alpha$/m);
@@ -289,8 +303,78 @@ test('ps1 leftover real directory under the temp prefix is not deleted', {
   await writeFile(join(leftoverDir, 'sentinel'), 'keep-dir');
   const result = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind: 'ps1' });
   assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.match(result.stderr, /skipping leftover skill temp/);
   assert.equal(isDirectoryNotLink(leftoverDir), true);
   assert.equal(await readFile(join(leftoverDir, 'sentinel'), 'utf8'), 'keep-dir');
+  assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
+});
+
+forEachDoctorKind('leftover temp skill file is removed and install still succeeds', async (_t, kind) => {
+  const { workDir, home, env } = await setupDoctor();
+  const destRoot = join(home, '.agents/skills');
+  const { leftover } = await plantLeftoverSkillFile(destRoot);
+  const result = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.equal(existsSync(leftover), false);
+  assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
+  assertOurLink(agentsSkill(home, 'beta'), checkoutSkills(home, 'beta'));
+});
+
+forEachDoctorKind('leftover temp skill file link is removed without touching its target', async (_t, kind) => {
+  const { workDir, home, env } = await setupDoctor();
+  const destRoot = join(home, '.agents/skills');
+  const { leftover, leftoverTarget } = await plantLeftoverSkillFileLink(destRoot);
+  const result = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.equal(existsSync(leftover), false);
+  assert.equal(lstatSync(leftoverTarget).isFile(), true);
+  assert.equal(await readFile(leftoverTarget, 'utf8'), 'keep-file');
+  assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
+});
+
+forEachDoctorKind('obsolete managed skill link is removed without touching a sibling target', async (_t, kind) => {
+  const { workDir, home, env } = await setupDoctor();
+  const first = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind });
+  assert.equal(first.status, 0, first.stderr + first.stdout);
+  const destRoot = join(home, '.agents/skills');
+  const sibling = join(destRoot, 'keep-me');
+  await mkdir(sibling, { recursive: true });
+  await writeFile(join(sibling, 'sentinel'), 'keep-sibling');
+  const staleSource = checkoutSkills(home, 'stale');
+  const staleLink = await plantDanglingSkillLink(destRoot, staleSource);
+  assert.equal(lstatSync(staleLink).isSymbolicLink(), true);
+  const managedPath = join(home, '.local/state/shiori/managed-skills');
+  const managed = await readFile(managedPath, 'utf8');
+  await writeFile(managedPath, `${managed.trimEnd()}\nstale\n`);
+  const second = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind });
+  assert.equal(second.status, 0, second.stderr + second.stdout);
+  assertPathGone(staleLink, 'obsolete dest link should be gone');
+  assert.equal(isDirectoryNotLink(sibling), true);
+  assert.equal(await readFile(join(sibling, 'sentinel'), 'utf8'), 'keep-sibling');
+  assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
+  assertOurLink(agentsSkill(home, 'beta'), checkoutSkills(home, 'beta'));
+  const afterManaged = await readFile(managedPath, 'utf8');
+  assert.match(afterManaged, /^alpha$/m);
+  assert.match(afterManaged, /^beta$/m);
+  assert.doesNotMatch(afterManaged, /^stale$/m);
+  assert.doesNotMatch(afterManaged, /^keep-me$/m);
+});
+
+forEachDoctorKind('replaced managed skill link is not followed into a live sentinel', async (_t, kind) => {
+  const { workDir, home, env, upstream } = await setupDoctor();
+  const first = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind });
+  assert.equal(first.status, 0, first.stderr + first.stdout);
+  const destRoot = join(home, '.agents/skills');
+  await rm(agentsSkill(home, 'beta'), { force: true });
+  const { leftover, leftoverTarget } = await plantLeftoverSkillLink(destRoot, { name: 'beta' });
+  await rm(join(upstream, 'skills/beta'), { recursive: true, force: true });
+  git(['add', '-A'], { cwd: upstream });
+  git(['commit', '-m', 'drop beta'], { cwd: upstream });
+  const second = runDoctor(workDir, { update: ['mcode'] }, { home, env, kind });
+  assert.equal(second.status, 0, second.stderr + second.stdout);
+  assert.equal(lstatSync(leftover).isSymbolicLink(), true);
+  assert.equal(lstatSync(leftoverTarget).isDirectory(), true);
+  assert.equal(await readFile(join(leftoverTarget, 'sentinel'), 'utf8'), 'keep');
   assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
 });
 

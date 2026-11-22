@@ -363,6 +363,7 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(powerShellDoctor, /Test-SharedSkillsInstalled/);
   assert.match(powerShellDoctor, /Sync-SkillsDest/);
   assert.match(powerShellDoctor, /\[IO\.Directory\]::Delete/);
+  assert.match(powerShellDoctor, /\[IO\.File\]::Delete/);
   assert.match(powerShellDoctor, /FileAttributes\]::ReparsePoint/);
   assert.doesNotMatch(powerShellDoctor, /Remove-Item/);
   assert.match(powerShellDoctor, /ClaudeSkillsRoot/);

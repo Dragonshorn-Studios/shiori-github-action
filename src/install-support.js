@@ -1583,8 +1583,20 @@ function Remove-LeftoverSkillTemps {
     param([string]$DestRoot)
     if (-not (Test-Path -LiteralPath $DestRoot)) { return }
     Get-ChildItem -LiteralPath $DestRoot -Force | Where-Object { $_.Name -like ($SkillLinkTempPrefix + '*') } | ForEach-Object {
-        if ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-            [IO.Directory]::Delete($_.FullName)
+        try {
+            if ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                if ($_.PSIsContainer) {
+                    [IO.Directory]::Delete($_.FullName)
+                } else {
+                    [IO.File]::Delete($_.FullName)
+                }
+            } elseif ($_.PSIsContainer) {
+                [Console]::Error.WriteLine(\"Warning: skipping leftover skill temp $($_.FullName); it is a directory, not a link.\")
+            } else {
+                [IO.File]::Delete($_.FullName)
+            }
+        } catch {
+            [Console]::Error.WriteLine(\"Warning: could not remove leftover skill temp $($_.FullName); continuing.\")
         }
     }
 }
@@ -1608,8 +1620,16 @@ function Sync-SkillsDest {
         $OldTarget = Join-Path $DestRoot $OldSkill
         $OldItem = Get-Item -LiteralPath $OldTarget -Force -ErrorAction SilentlyContinue
         if (-not (Test-Path -LiteralPath $OldSource) -and (Test-ShioriSkillLink $OldItem $OldSource)) {
-            [IO.Directory]::Delete($OldTarget)
-            $script:SkillsChanged = $true
+            try {
+                if ($OldItem.PSIsContainer) {
+                    [IO.Directory]::Delete($OldTarget)
+                } else {
+                    [IO.File]::Delete($OldTarget)
+                }
+                $script:SkillsChanged = $true
+            } catch {
+                [Console]::Error.WriteLine(\"Warning: could not remove obsolete skill link $OldTarget; continuing.\")
+            }
         }
     }
     $LinkType = if ($env:OS -eq 'Windows_NT') { 'Junction' } else { 'SymbolicLink' }
