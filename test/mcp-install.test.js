@@ -1079,7 +1079,7 @@ test('resolveCommand returns the realpath of a found Craft CLI', async () => {
   const linkRoot = await mkdtemp(join(tmpdir(), 'shiori-pf-link-'));
   await symlink(join(realRoot, 'FigCraft'), join(linkRoot, 'FigCraft'));
   const env = craftSearchEnv({ SHIORI_CRAFT_PROGRAM_FILES: linkRoot });
-  assert.equal(resolveCommand('figcraft-cli', env), realpathSync(figcraftPath));
+  assertSamePath(resolveCommand('figcraft-cli', env), realpathSync(figcraftPath));
 });
 
 test('detect lists Program Files Craft CLIs without writing', async () => {
