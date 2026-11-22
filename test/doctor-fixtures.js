@@ -10,6 +10,18 @@ import { installSupportFiles } from '../src/install-support.js';
 export const isWindows = process.platform === 'win32';
 export const SKIP_NO_WINDOWS_RUNNER = 'skipped: no Windows runner';
 
+export function snapshotDoctorStdout(stdout) {
+  return String(stdout || '')
+    .replaceAll('\r\n', '\n')
+    .replace(/[0-9a-f]{40}/gi, '<sha>')
+    .replace(/^(detected|not detected): (.*)$/gm, (_match, label, list) => {
+      if (list === 'none') return `${label}: none`;
+      return `${label}: ${list.split(/[,\s]+/).filter(Boolean).join(', ')}`;
+    })
+    .replace(/[ \t]+$/gm, '')
+    .trim() + '\n';
+}
+
 function resolveOnPath(names) {
   for (const name of names) {
     const result = spawnSync(isWindows ? 'where.exe' : 'sh', isWindows ? [name] : ['-c', `command -v ${JSON.stringify(name)}`], {
@@ -250,6 +262,52 @@ export async function plantOutwardSymlink(home, rel = '.agents/skills') {
   await mkdir(dirname(dest), { recursive: true });
   await symlink(outside, dest, 'dir');
   return { dest, outside };
+}
+
+export async function plantLeftoverSkillLink(destRoot, options = {}) {
+  const leftoverTarget = options.target || await mkdtemp(join(tmpdir(), 'shiori-link-target-'));
+  await mkdir(leftoverTarget, { recursive: true });
+  await writeFile(join(leftoverTarget, 'sentinel'), 'keep');
+  await mkdir(destRoot, { recursive: true });
+  const leftover = join(destRoot, options.name || '.shiori-link-leftover');
+  await symlink(leftoverTarget, leftover, 'dir');
+  return { leftover, leftoverTarget };
+}
+
+export async function plantLeftoverSkillFile(destRoot, options = {}) {
+  await mkdir(destRoot, { recursive: true });
+  const leftover = join(destRoot, options.name || '.shiori-link-leftover-file');
+  await writeFile(leftover, options.contents || 'stale-temp');
+  return { leftover };
+}
+
+export async function plantLeftoverSkillFileLink(destRoot, options = {}) {
+  const leftoverTargetDir = options.targetDir || await mkdtemp(join(tmpdir(), 'shiori-file-target-'));
+  await mkdir(leftoverTargetDir, { recursive: true });
+  const leftoverTarget = options.target || join(leftoverTargetDir, 'sentinel');
+  await writeFile(leftoverTarget, 'keep-file');
+  await mkdir(destRoot, { recursive: true });
+  const leftover = join(destRoot, options.name || '.shiori-link-leftover-file');
+  await symlink(leftoverTarget, leftover);
+  return { leftover, leftoverTarget };
+}
+
+export async function plantDanglingSkillLink(destRoot, expectedTarget, name = 'stale') {
+  await mkdir(destRoot, { recursive: true });
+  const link = join(destRoot, name);
+  await symlink(expectedTarget, link, 'dir');
+  return link;
+}
+
+export async function plantLeftoverSkillJunction(destRoot, options = {}) {
+  if (!isWindows) throw new Error('junctions require Windows');
+  const leftoverTarget = options.target || await mkdtemp(join(tmpdir(), 'shiori-link-target-'));
+  await mkdir(leftoverTarget, { recursive: true });
+  await writeFile(join(leftoverTarget, 'sentinel'), 'keep');
+  await mkdir(destRoot, { recursive: true });
+  const leftover = join(destRoot, options.name || '.shiori-link-leftover');
+  execFileSync('cmd.exe', ['/c', 'mklink', '/J', leftover, leftoverTarget], { encoding: 'utf8' });
+  return { leftover, leftoverTarget };
 }
 
 export async function plantOutwardJunction(home, rel = '.agents/skills') {

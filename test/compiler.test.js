@@ -310,7 +310,12 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   const setupGuide = await readFile(join(repositoryRoot, 'AGENT-SETUP.md'), 'utf8');
   assert.match(setupGuide, /curl -fsSL/);
   assert.match(setupGuide, /irm .* \| iex/);
-  assert.match(setupGuide, /--install opencode mcode vibe codex claude cursor devin/);
+  assert.match(setupGuide, /SHIORI_INSTALL=all sh/);
+  assert.match(setupGuide, /\$env:SHIORI_INSTALL='all'/);
+  assert.match(setupGuide, /SHIORI_INSTALL='codex,claude,cursor'/);
+  assert.match(setupGuide, /SHIORI_UPDATE=all sh/);
+  assert.match(setupGuide, /\$env:SHIORI_UPDATE='all'/);
+  assert.ok(setupGuide.indexOf('SHIORI_INSTALL=all sh') < setupGuide.indexOf("SHIORI_INSTALL='codex,claude,cursor'"));
   assert.match(setupGuide, /--update/);
   assert.match(setupGuide, /figcraft-cli mcp/);
   assert.match(setupGuide, /claude mcp add -s user/);
@@ -357,6 +362,10 @@ test('turns only exported tagged documents into cross-agent skills, native agent
   assert.match(powerShellDoctor, /Get-ShioriInstallStatus/);
   assert.match(powerShellDoctor, /Test-SharedSkillsInstalled/);
   assert.match(powerShellDoctor, /Sync-SkillsDest/);
+  assert.match(powerShellDoctor, /\[IO\.Directory\]::Delete/);
+  assert.match(powerShellDoctor, /\[IO\.File\]::Delete/);
+  assert.match(powerShellDoctor, /FileAttributes\]::ReparsePoint/);
+  assert.doesNotMatch(powerShellDoctor, /Remove-Item/);
   assert.match(powerShellDoctor, /ClaudeSkillsRoot/);
   assert.match(powerShellDoctor, /Test-RecordedHost/);
   assert.match(powerShellDoctor, /Add-RecordedHost codex/);

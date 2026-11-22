@@ -620,9 +620,38 @@ export function installSupportFiles(config) {
   ]);
 }
 
+const NAMED_PIPE_HOST_IDS = ['codex', 'claude', 'cursor'];
+
+export function namedPipeHosts() {
+  const installable = new Set(installableDoctorHosts().map(host => host.id));
+  return NAMED_PIPE_HOST_IDS.filter(id => installable.has(id)).join(',');
+}
+
+function doctorRawBase(repository) {
+  return `https://raw.githubusercontent.com/${repository}/main`;
+}
+
+function psHereStringLiteral(value) {
+  return String(value).replaceAll('`', '``').replaceAll('$', '`$');
+}
+
+export function doctorPipeOneLiners(repository) {
+  const rawBase = doctorRawBase(repository);
+  const named = namedPipeHosts();
+  return {
+    rawBase,
+    installAllSh: `curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | SHIORI_INSTALL=all sh`,
+    installAllPs1: `$env:SHIORI_INSTALL='all'; irm ${rawBase}/scripts/shiori-doctor.ps1 | iex`,
+    installNamedSh: `curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | SHIORI_INSTALL='${named}' sh`,
+    installNamedPs1: `$env:SHIORI_INSTALL='${named}'; irm ${rawBase}/scripts/shiori-doctor.ps1 | iex`,
+    updateAllSh: `curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | SHIORI_UPDATE=all sh`,
+    updateAllPs1: `$env:SHIORI_UPDATE='all'; irm ${rawBase}/scripts/shiori-doctor.ps1 | iex`
+  };
+}
+
 function renderGuide(repository, marketplace, archiveUrl) {
-  const rawBase = `https://raw.githubusercontent.com/${repository}/main`;
-  const exampleHosts = installableDoctorHostsInCliOrder().map(host => host.id).join(' ');
+  const lines = doctorPipeOneLiners(repository);
+  const rawBase = lines.rawBase;
   return `# Install Shiori for coding agents
 
 Run the read-only doctor without cloning the repository:
@@ -649,14 +678,24 @@ The doctor is read-only. It does not edit home-directory configuration or instal
 
 ## Install from the command line
 
-\`--install\` or \`--update\` with no host names sets up every locally detected installable host. An explicit host list still takes precedence over detection. Hosts that already read \`~/.agents/skills\` with full skill functionality share one managed checkout at \`~/.local/share/shiori/shiori-brain\` and receive individual links in \`~/.agents/skills/<name>\`. Claude Code uses the same checkout linked into \`~/.claude/skills/<name>\`. Two hosts that share a destination never get two copies. The doctor does not install Codex or Claude plugins; those remain published in the repository marketplace as a separate channel (ChatGPT web and manual installs). Cursor, Devin, OpenCode, Claude Code, and Codex also receive MCP config under \`--install\` / \`--update\`. Devin is detected only when the \`devin\` CLI is on \`PATH\` or \`~/.config/devin\` / \`~/.devin\` exists; cloud-capable status alone is not enough:
+\`--install\` or \`--update\` with no host names sets up every locally detected installable host. An explicit host list still takes precedence over detection. Hosts that already read \`~/.agents/skills\` with full skill functionality share one managed checkout at \`~/.local/share/shiori/shiori-brain\` and receive individual links in \`~/.agents/skills/<name>\`. Claude Code uses the same checkout linked into \`~/.claude/skills/<name>\`. Two hosts that share a destination never get two copies. The doctor does not install Codex or Claude plugins; those remain published in the repository marketplace as a separate channel (ChatGPT web and manual installs). Cursor, Devin, OpenCode, Claude Code, and Codex also receive MCP config under \`--install\` / \`--update\`. Devin is detected only when the \`devin\` CLI is on \`PATH\` or \`~/.config/devin\` / \`~/.devin\` exists; cloud-capable status alone is not enough. A bare \`curl | sh\` / \`irm | iex\` with no environment variable stays read-only.
 
 \`\`\`bash
-curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | sh -s -- --install ${exampleHosts}
+${lines.installAllSh}
 \`\`\`
 
 \`\`\`powershell
-$env:SHIORI_INSTALL='${installableDoctorHostsInCliOrder().map(host => host.id).join(',')}'; irm ${rawBase}/scripts/shiori-doctor.ps1 | iex
+${lines.installAllPs1}
+\`\`\`
+
+Named hosts:
+
+\`\`\`bash
+${lines.installNamedSh}
+\`\`\`
+
+\`\`\`powershell
+${lines.installNamedPs1}
 \`\`\`
 
 For a checked-out script, use \`sh scripts/shiori-doctor.sh --install\` to set up every detected host, or \`sh scripts/shiori-doctor.sh --install opencode mcode vibe\` / \`.\\scripts\\shiori-doctor.ps1 -Install opencode,mcode,vibe\` to name hosts. Re-running install fast-forwards the managed checkout and reconciles skill links. Existing non-Shiori skill destinations are skipped with a warning and never overwritten. A host that is not detected is not created.
@@ -670,11 +709,11 @@ ${renderInstallEffectTable()}
 \`--install\` records each host it successfully sets up in \`~/.local/state/shiori/installed-hosts\`. A named \`--update\` still re-runs the current doctor against those recorded hosts. A bare \`--update\` (or \`SHIORI_UPDATE=all\`) sets up every host the doctor currently detects, including tools that were never recorded. Recorded-but-no-longer-detected hosts are not required. If a detected host cannot be installed, the doctor warns, continues with the rest, and exits non-zero:
 
 \`\`\`bash
-curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | sh -s -- --update
+${lines.updateAllSh}
 \`\`\`
 
 \`\`\`powershell
-$env:SHIORI_UPDATE='all'; irm ${rawBase}/scripts/shiori-doctor.ps1 | iex
+${lines.updateAllPs1}
 \`\`\`
 
 Pass names after \`--install\` / \`--update\`, or use PowerShell \`-Install opencode\` / \`-Update -UpdateTargets opencode,mcode\`, to change only selected hosts. A bare run with no \`--install\` / \`--update\` stays read-only. Checkout updates are always \`git pull --ff-only\`; an unexpected origin, dirty checkout, non-repository path, or skills directory symlink leaving \`\$HOME\` stops the operation rather than deleting user data. A second consecutive \`--update\` with no checkout change reports \`already current\` and writes nothing. If nothing installable is detected, the doctor prints an error on stderr and writes nothing.
@@ -705,6 +744,7 @@ AFFiNE remains canonical. Do not edit generated skills, manifests, this guide, o
 
 function renderShellDoctor(repository, marketplace, archiveUrl) {
   const names = installableNamesList();
+  const lines = doctorPipeOneLiners(repository);
   return `#!/usr/bin/env sh
 set -eu
 
@@ -983,6 +1023,15 @@ comma_hosts() {
     fi
   done
 }
+print_host_list() {
+  prefix=$1
+  shift
+  if [ \"$#\" -eq 0 ]; then
+    printf '%s: none\\n' \"$prefix\"
+  else
+    printf '%s: %s\\n' \"$prefix\" \"$(comma_hosts \"$@\")\"
+  fi
+}
 list_detected_hosts() {
   detected_list=''
   not_detected=''
@@ -1014,7 +1063,7 @@ print_quiet_report() {
   fi
   [ -z \"$checkout_line\" ] || printf '%s\\n' \"$checkout_line\"
   list_detected_hosts
-  printf 'detected: %s\\n' \"\${detected_list:-none}\"
+  print_host_list detected $detected_list
   print_quiet_destinations
   if [ \"$install_failed\" = true ] && [ \"$checkout_changed\" = false ] && [ \"$skills_changed\" = false ]; then
     printf 'skipped\\n'
@@ -1034,6 +1083,12 @@ print_usage() {
     '  --verbose          print the status table, recipes, git, and MCP lines.' \\
     '  --help             print this usage text.' \\
     '  Host names may be space- or comma-separated; SHIORI_INSTALL / SHIORI_UPDATE / SHIORI_VERBOSE are the pipe equivalents.' \\
+    '  Pipe (every detected host first; a bare curl | sh stays read-only):' \\
+    '    ${lines.installAllSh}' \\
+    '    ${lines.installAllPs1.replaceAll("'", "'\\''")}' \\
+    '    ${lines.updateAllSh}' \\
+    '    ${lines.updateAllPs1.replaceAll("'", "'\\''")}' \\
+    '  Named hosts: SHIORI_INSTALL='\\''${namedPipeHosts()}'\\'' (or SHIORI_UPDATE).' \\
     '' \\
     'Recommended native setup' \\
 ${shellRecipes(repository).split('\n').map(line => `    '${line}'`).join(' \\\n')} \\
@@ -1181,8 +1236,8 @@ if [ \"$verbose\" = true ]; then
 fi
 if [ -z \"$operation\" ] && [ \"$verbose\" != true ]; then
   list_detected_hosts
-  printf 'detected: %s\\n' \"\${detected_list:-none}\"
-  printf 'not detected: %s\\n' \"\${not_detected:-none}\"
+  print_host_list detected $detected_list
+  print_host_list 'not detected' $not_detected
 fi
 
 if [ -n \"$operation\" ]; then
@@ -1270,6 +1325,7 @@ function renderPowerShellDoctor(repository, marketplace, archiveUrl) {
   const agentsList = psSkillsDestList('agents');
   const claudeList = psSkillsDestList('claude');
   const mcpList = psMcpList();
+  const lines = doctorPipeOneLiners(repository);
   return `# Generated by Shiori. Safe to run from a checkout or through irm | iex.
 param(
     [string[]]$Install = @(),
@@ -1546,7 +1602,24 @@ function Remove-LeftoverSkillTemps {
     param([string]$DestRoot)
     if (-not (Test-Path -LiteralPath $DestRoot)) { return }
     Get-ChildItem -LiteralPath $DestRoot -Force | Where-Object { $_.Name -like ($SkillLinkTempPrefix + '*') } | ForEach-Object {
-        Remove-Item -LiteralPath $_.FullName -Force
+        $LeftoverPath = $_.FullName
+        $LeftoverIsContainer = [bool]$_.PSIsContainer
+        $LeftoverIsReparse = [bool]($_.Attributes -band [IO.FileAttributes]::ReparsePoint)
+        try {
+            if ($LeftoverIsReparse) {
+                if ($LeftoverIsContainer) {
+                    [IO.Directory]::Delete($LeftoverPath)
+                } else {
+                    [IO.File]::Delete($LeftoverPath)
+                }
+            } elseif ($LeftoverIsContainer) {
+                [Console]::Error.WriteLine(\"Warning: skipping leftover skill temp $LeftoverPath; it is a directory, not a link.\")
+            } else {
+                [IO.File]::Delete($LeftoverPath)
+            }
+        } catch {
+            [Console]::Error.WriteLine(\"Warning: could not remove leftover skill temp $LeftoverPath; continuing.\")
+        }
     }
 }
 
@@ -1569,8 +1642,16 @@ function Sync-SkillsDest {
         $OldTarget = Join-Path $DestRoot $OldSkill
         $OldItem = Get-Item -LiteralPath $OldTarget -Force -ErrorAction SilentlyContinue
         if (-not (Test-Path -LiteralPath $OldSource) -and (Test-ShioriSkillLink $OldItem $OldSource)) {
-            Remove-Item -LiteralPath $OldTarget -Force
-            $script:SkillsChanged = $true
+            try {
+                if ($OldItem.PSIsContainer) {
+                    [IO.Directory]::Delete($OldTarget)
+                } else {
+                    [IO.File]::Delete($OldTarget)
+                }
+                $script:SkillsChanged = $true
+            } catch {
+                [Console]::Error.WriteLine(\"Warning: could not remove obsolete skill link $OldTarget; continuing.\")
+            }
         }
     }
     $LinkType = if ($env:OS -eq 'Windows_NT') { 'Junction' } else { 'SymbolicLink' }
@@ -1649,6 +1730,12 @@ How -Install and -Update work
   -Verbose          print the status table, recipes, git, and MCP lines.
   -Help             print this usage text.
   Host names may be comma- or space-separated; SHIORI_INSTALL / SHIORI_UPDATE / SHIORI_VERBOSE are the pipe equivalents.
+  Pipe (every detected host first; a bare irm | iex stays read-only):
+    ${lines.installAllSh}
+    ${psHereStringLiteral(lines.installAllPs1)}
+    ${lines.updateAllSh}
+    ${psHereStringLiteral(lines.updateAllPs1)}
+  Named hosts: SHIORI_INSTALL='${namedPipeHosts()}' (or SHIORI_UPDATE).
 
 Recommended native setup
 ${psRecipes(repository)}
