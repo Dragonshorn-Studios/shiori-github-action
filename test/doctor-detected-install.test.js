@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import test from 'node:test';
-import { doctorPipeOneLiners, installSupportFiles } from '../src/install-support.js';
+import { doctorPipeOneLiners, installSupportFiles, installableDoctorHosts, namedPipeHosts } from '../src/install-support.js';
 import {
   agentsSkill,
   baseDoctorEnv,
@@ -276,9 +276,24 @@ forEachDoctorKind('SHIORI_UPDATE=all matches bare --update', async (_t, kind) =>
   assert.deepEqual([...recordedCli].sort(), [...recordedEnv].sort());
 });
 
-test('SHIORI_INSTALL=all and SHIORI_UPDATE=all match between sh and ps1', async () => {
+test('snapshotDoctorStdout normalizes space-joined detected host lists', () => {
+  assert.equal(
+    snapshotDoctorStdout('detected: opencode cursor\nnot detected: claude, vibe\n'),
+    'detected: opencode, cursor\nnot detected: claude, vibe\n'
+  );
+});
+
+test('named pipe hosts are installable map ids', () => {
+  const names = namedPipeHosts().split(',').filter(Boolean);
+  const ids = new Set(installableDoctorHosts().map(host => host.id));
+  assert.ok(names.length > 0);
+  for (const name of names) assert.equal(ids.has(name), true, name);
+});
+
+test('SHIORI_INSTALL=all and SHIORI_UPDATE=all match between sh and ps1', {
+  skip: (doctorKinds().includes('sh') && doctorKinds().includes('ps1')) ? false : 'need both sh and ps1 doctor kinds'
+}, async () => {
   const kinds = doctorKinds();
-  assert.ok(kinds.includes('sh') && kinds.includes('ps1'), `need sh and ps1, got ${kinds.join(',')}`);
   const results = {};
   for (const kind of kinds) {
     const setup = await setupDoctor();
@@ -298,12 +313,14 @@ test('SHIORI_INSTALL=all and SHIORI_UPDATE=all match between sh and ps1', async 
       kind
     });
     assert.equal(named.status, 0, named.stderr + named.stdout);
+    await mkdir(join(setup.home, '.config/opencode'), { recursive: true });
     const updated = runDoctor(setup.workDir, { rest: [] }, {
       home: setup.home,
       env: { ...setup.env, SHIORI_UPDATE: 'all' },
       kind
     });
     assert.equal(updated.status, 0, updated.stderr + updated.stdout);
+    assert.match(snapshotDoctorStdout(updated.stdout), /detected: .+, /);
     results[kind] = {
       installOut: snapshotDoctorStdout(installed.stdout),
       updateOut: snapshotDoctorStdout(updated.stdout),
@@ -321,8 +338,9 @@ test('README lists SHIORI_INSTALL=all one-liners before named hosts', async () =
   const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8');
   const allSh = readme.indexOf('SHIORI_INSTALL=all sh');
   const allPs = readme.indexOf("$env:SHIORI_INSTALL='all'");
-  const namedSh = readme.indexOf("SHIORI_INSTALL='codex,claude,cursor' sh");
-  const namedPs = readme.indexOf("$env:SHIORI_INSTALL='codex,claude,cursor'");
+  const named = namedPipeHosts();
+  const namedSh = readme.indexOf(`SHIORI_INSTALL='${named}' sh`);
+  const namedPs = readme.indexOf(`$env:SHIORI_INSTALL='${named}'`);
   assert.ok(allSh >= 0 && allPs >= 0 && namedSh >= 0 && namedPs >= 0);
   assert.ok(allSh < namedSh);
   assert.ok(allPs < namedPs);

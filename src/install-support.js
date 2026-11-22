@@ -620,20 +620,30 @@ export function installSupportFiles(config) {
   ]);
 }
 
-const NAMED_PIPE_HOSTS = 'codex,claude,cursor';
+const NAMED_PIPE_HOST_IDS = ['codex', 'claude', 'cursor'];
+
+export function namedPipeHosts() {
+  const installable = new Set(installableDoctorHosts().map(host => host.id));
+  return NAMED_PIPE_HOST_IDS.filter(id => installable.has(id)).join(',');
+}
 
 function doctorRawBase(repository) {
   return `https://raw.githubusercontent.com/${repository}/main`;
 }
 
+function psHereStringLiteral(value) {
+  return String(value).replaceAll('`', '``').replaceAll('$', '`$');
+}
+
 export function doctorPipeOneLiners(repository) {
   const rawBase = doctorRawBase(repository);
+  const named = namedPipeHosts();
   return {
     rawBase,
     installAllSh: `curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | SHIORI_INSTALL=all sh`,
     installAllPs1: `$env:SHIORI_INSTALL='all'; irm ${rawBase}/scripts/shiori-doctor.ps1 | iex`,
-    installNamedSh: `curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | SHIORI_INSTALL='${NAMED_PIPE_HOSTS}' sh`,
-    installNamedPs1: `$env:SHIORI_INSTALL='${NAMED_PIPE_HOSTS}'; irm ${rawBase}/scripts/shiori-doctor.ps1 | iex`,
+    installNamedSh: `curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | SHIORI_INSTALL='${named}' sh`,
+    installNamedPs1: `$env:SHIORI_INSTALL='${named}'; irm ${rawBase}/scripts/shiori-doctor.ps1 | iex`,
     updateAllSh: `curl -fsSL ${rawBase}/scripts/shiori-doctor.sh | SHIORI_UPDATE=all sh`,
     updateAllPs1: `$env:SHIORI_UPDATE='all'; irm ${rawBase}/scripts/shiori-doctor.ps1 | iex`
   };
@@ -1013,6 +1023,15 @@ comma_hosts() {
     fi
   done
 }
+print_host_list() {
+  prefix=$1
+  shift
+  if [ \"$#\" -eq 0 ]; then
+    printf '%s: none\\n' \"$prefix\"
+  else
+    printf '%s: %s\\n' \"$prefix\" \"$(comma_hosts \"$@\")\"
+  fi
+}
 list_detected_hosts() {
   detected_list=''
   not_detected=''
@@ -1044,7 +1063,7 @@ print_quiet_report() {
   fi
   [ -z \"$checkout_line\" ] || printf '%s\\n' \"$checkout_line\"
   list_detected_hosts
-  printf 'detected: %s\\n' \"\${detected_list:-none}\"
+  print_host_list detected $detected_list
   print_quiet_destinations
   if [ \"$install_failed\" = true ] && [ \"$checkout_changed\" = false ] && [ \"$skills_changed\" = false ]; then
     printf 'skipped\\n'
@@ -1069,7 +1088,7 @@ print_usage() {
     '    ${lines.installAllPs1.replaceAll("'", "'\\''")}' \\
     '    ${lines.updateAllSh}' \\
     '    ${lines.updateAllPs1.replaceAll("'", "'\\''")}' \\
-    '  Named hosts: SHIORI_INSTALL='\\''${NAMED_PIPE_HOSTS}'\\'' (or SHIORI_UPDATE).' \\
+    '  Named hosts: SHIORI_INSTALL='\\''${namedPipeHosts()}'\\'' (or SHIORI_UPDATE).' \\
     '' \\
     'Recommended native setup' \\
 ${shellRecipes(repository).split('\n').map(line => `    '${line}'`).join(' \\\n')} \\
@@ -1217,8 +1236,8 @@ if [ \"$verbose\" = true ]; then
 fi
 if [ -z \"$operation\" ] && [ \"$verbose\" != true ]; then
   list_detected_hosts
-  printf 'detected: %s\\n' \"\${detected_list:-none}\"
-  printf 'not detected: %s\\n' \"\${not_detected:-none}\"
+  print_host_list detected $detected_list
+  print_host_list 'not detected' $not_detected
 fi
 
 if [ -n \"$operation\" ]; then
@@ -1713,10 +1732,10 @@ How -Install and -Update work
   Host names may be comma- or space-separated; SHIORI_INSTALL / SHIORI_UPDATE / SHIORI_VERBOSE are the pipe equivalents.
   Pipe (every detected host first; a bare irm | iex stays read-only):
     ${lines.installAllSh}
-    \`\$env:SHIORI_INSTALL='all'; irm ${lines.rawBase}/scripts/shiori-doctor.ps1 | iex
+    ${psHereStringLiteral(lines.installAllPs1)}
     ${lines.updateAllSh}
-    \`\$env:SHIORI_UPDATE='all'; irm ${lines.rawBase}/scripts/shiori-doctor.ps1 | iex
-  Named hosts: SHIORI_INSTALL='${NAMED_PIPE_HOSTS}' (or SHIORI_UPDATE).
+    ${psHereStringLiteral(lines.updateAllPs1)}
+  Named hosts: SHIORI_INSTALL='${namedPipeHosts()}' (or SHIORI_UPDATE).
 
 Recommended native setup
 ${psRecipes(repository)}

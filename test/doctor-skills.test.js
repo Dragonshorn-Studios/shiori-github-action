@@ -298,6 +298,27 @@ test('ps1 leftover skill junction is removed without touching its target', {
   assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
 });
 
+test('ps1 obsolete managed skill junction is removed without touching a sibling target', {
+  skip: isWindows ? false : SKIP_NO_WINDOWS_RUNNER
+}, async () => {
+  const { workDir, home, env, upstream } = await setupDoctor();
+  const first = runDoctor(workDir, { install: ['mcode'] }, { home, env, kind: 'ps1' });
+  assert.equal(first.status, 0, first.stderr + first.stdout);
+  const destRoot = join(home, '.agents/skills');
+  const sibling = join(destRoot, 'keep-me');
+  await mkdir(sibling, { recursive: true });
+  await writeFile(join(sibling, 'sentinel'), 'keep-sibling');
+  await rm(join(upstream, 'skills/beta'), { recursive: true, force: true });
+  git(['add', '-A'], { cwd: upstream });
+  git(['commit', '-m', 'drop beta'], { cwd: upstream });
+  const second = runDoctor(workDir, { update: ['mcode'] }, { home, env, kind: 'ps1' });
+  assert.equal(second.status, 0, second.stderr + second.stdout);
+  assertPathGone(agentsSkill(home, 'beta'), 'obsolete dest junction should be gone');
+  assert.equal(isDirectoryNotLink(sibling), true);
+  assert.equal(await readFile(join(sibling, 'sentinel'), 'utf8'), 'keep-sibling');
+  assertOurLink(agentsSkill(home, 'alpha'), checkoutSkills(home, 'alpha'));
+});
+
 test('ps1 leftover real directory under the temp prefix is not deleted', {
   skip: PWSH ? false : 'pwsh must be on PATH so ubuntu-latest can run generated shiori-doctor.ps1'
 }, async () => {

@@ -14,6 +14,10 @@ export function snapshotDoctorStdout(stdout) {
   return String(stdout || '')
     .replaceAll('\r\n', '\n')
     .replace(/[0-9a-f]{40}/gi, '<sha>')
+    .replace(/^(detected|not detected): (.*)$/gm, (_match, label, list) => {
+      if (list === 'none') return `${label}: none`;
+      return `${label}: ${list.split(/[,\s]+/).filter(Boolean).join(', ')}`;
+    })
     .replace(/[ \t]+$/gm, '')
     .trim() + '\n';
 }
